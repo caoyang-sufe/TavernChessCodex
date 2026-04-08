@@ -14,11 +14,8 @@
    ```
 3. 浏览器访问：
    - `http://127.0.0.1:8000/`
-   - `http://127.0.0.1:8000/handbook/`
-
 ## 关键说明
 
 - `game.html` 已迁移为 Django 模板：`core/templates/game.html`。
 - 后端会扫描 `./assets/card` 目录，动态生成 `cardPaths` 给前端脚本使用。
-- `/handbook` 页面会分别展示 `assets/card`、`assets/spell`、`assets/weapon` 三类图鉴，并按每页 10x6（60 张）分页显示。
 - 静态资源通过 Django `staticfiles` 提供，URL 前缀为 `/assets/`。
