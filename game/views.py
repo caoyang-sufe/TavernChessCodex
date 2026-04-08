@@ -7,7 +7,7 @@ from django.shortcuts import render
 def game_view(request):
     card_dir = Path(settings.BASE_DIR) / 'assets' / 'card'
     card_paths = sorted(
-        f"assets/card/{file_path.name}"
+        f"card/{file_path.name}"
         for file_path in card_dir.glob('*.png')
         if file_path.is_file()
     )
