@@ -8,6 +8,7 @@ from django.http import HttpRequest, HttpResponse
 from django.shortcuts import render
 
 CARD_SUFFIXES = {'.png', '.jpg', '.jpeg', '.webp'}
+HANDBOOK_PAGE_SIZE = 60
 GENERAL_ASSET_DIRS = [
     ('A', 'card'),
     ('B', 'piece'),
@@ -26,14 +27,18 @@ def _read_tsv(path: Path) -> list[dict[str, str]]:
 
 
 def _collect_card_assets() -> list[str]:
-    card_dir = Path(settings.BASE_DIR) / 'assets' / 'card'
-    if not card_dir.exists():
+    return _collect_assets_from_dir('card')
+
+
+def _collect_assets_from_dir(folder: str) -> list[str]:
+    asset_dir = Path(settings.BASE_DIR) / 'assets' / folder
+    if not asset_dir.exists():
         return []
 
     result: list[str] = []
-    for file in sorted(card_dir.iterdir()):
+    for file in sorted(asset_dir.iterdir()):
         if file.is_file() and file.suffix.lower() in CARD_SUFFIXES:
-            result.append(f'assets/card/{file.name}')
+            result.append(f'assets/{folder}/{file.name}')
     return result
 
 
@@ -138,5 +143,42 @@ def game_view(request: HttpRequest) -> HttpResponse:
         {
             'card_paths_json': json.dumps(card_paths, ensure_ascii=False),
             'handbook_json': json.dumps(handbook, ensure_ascii=False),
+        },
+    )
+
+
+def handbook_view(request: HttpRequest) -> HttpResponse:
+    handbook_type = request.GET.get('type', 'card')
+    if handbook_type not in {'card', 'spell', 'weapon'}:
+        handbook_type = 'card'
+
+    assets = _collect_assets_from_dir(handbook_type)
+    total = len(assets)
+    total_pages = max(1, (total + HANDBOOK_PAGE_SIZE - 1) // HANDBOOK_PAGE_SIZE)
+    try:
+        page = int(request.GET.get('page', '1') or 1)
+    except ValueError:
+        page = 1
+    page = max(1, min(page, total_pages))
+
+    start = (page - 1) * HANDBOOK_PAGE_SIZE
+    end = start + HANDBOOK_PAGE_SIZE
+    page_assets = assets[start:end]
+
+    return render(
+        request,
+        'handbook.html',
+        {
+            'handbook_type': handbook_type,
+            'assets': page_assets,
+            'page': page,
+            'total_pages': total_pages,
+            'total': total,
+            'rows': 10,
+            'cols': 6,
+            'has_prev': page > 1,
+            'has_next': page < total_pages,
+            'prev_page': page - 1,
+            'next_page': page + 1,
         },
     )

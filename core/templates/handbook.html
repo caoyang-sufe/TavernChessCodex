@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>图鉴页面</title>
+  <style>
+    body { margin: 0; font-family: "Microsoft YaHei", sans-serif; background: #f5efe6; color: #2e1c0f; }
+    .wrap { width: min(1480px, calc(100vw - 24px)); margin: 12px auto 24px; }
+    .top { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+    .tabs { display: flex; gap: 8px; flex-wrap: wrap; }
+    .tab {
+      border: 1px solid #b78658; border-radius: 999px; padding: 8px 14px; text-decoration: none;
+      color: #733f16; background: #fff8f0; font-weight: 700;
+    }
+    .tab.active { background: #8f4b1c; color: #fff; }
+    .meta { color: #6d543d; }
+    .grid {
+      margin-top: 12px;
+      display: grid;
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .cell {
+      background: #fff;
+      border: 1px solid #dfc3a4;
+      border-radius: 10px;
+      overflow: hidden;
+      min-height: 170px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .cell img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .pagination {
+      margin-top: 16px;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 10px;
+    }
+    .page-btn {
+      border: 1px solid #b78658;
+      border-radius: 8px;
+      padding: 6px 12px;
+      background: #fff;
+      text-decoration: none;
+      color: #733f16;
+      font-weight: 700;
+    }
+    .page-btn.disabled { opacity: 0.45; pointer-events: none; }
+    .empty {
+      margin-top: 20px;
+      text-align: center;
+      color: #7f6750;
+      padding: 20px;
+      background: #fff;
+      border: 1px dashed #dfc3a4;
+      border-radius: 12px;
+    }
+    @media (max-width: 1100px) { .grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+    @media (max-width: 780px) { .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <section class="top">
+      <div>
+        <h1>图鉴 /handbook</h1>
+        <div class="meta">每页固定展示 10 行 × 6 列（共 60 张）。当前共 {{ total }} 张。</div>
+      </div>
+      <div class="tabs">
+        <a class="tab{% if handbook_type == 'card' %} active{% endif %}" href="/handbook/?type=card&page=1">武将图鉴</a>
+        <a class="tab{% if handbook_type == 'spell' %} active{% endif %}" href="/handbook/?type=spell&page=1">锦囊图鉴</a>
+        <a class="tab{% if handbook_type == 'weapon' %} active{% endif %}" href="/handbook/?type=weapon&page=1">装备图鉴</a>
+      </div>
+    </section>
+
+    {% if assets %}
+      <section class="grid">
+        {% for image in assets %}
+          <article class="cell">
+            <img src="/{{ image }}" alt="{{ image }}">
+          </article>
+        {% endfor %}
+      </section>
+    {% else %}
+      <div class="empty">当前分类暂无图片。</div>
+    {% endif %}
+
+    <nav class="pagination">
+      <a class="page-btn{% if not has_prev %} disabled{% endif %}" href="/handbook/?type={{ handbook_type }}&page={{ prev_page }}">上一页</a>
+      <span>第 {{ page }} / {{ total_pages }} 页</span>
+      <a class="page-btn{% if not has_next %} disabled{% endif %}" href="/handbook/?type={{ handbook_type }}&page={{ next_page }}">下一页</a>
+    </nav>
+  </main>
+</body>
+</html>
