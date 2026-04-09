@@ -949,7 +949,17 @@
       phase: 'recruit', shopCards: [], handCards: [], boardCards: [], enemyBoardCards: [], refreshCount: 0, nextId: 1,
       dragPayload: null, money: START_MONEY, timerRemaining: TURN_DURATION, timerId: null, battleTimerId: null,
       battleLog: ['战斗尚未开始。'], battleTurn: 0, battleFirstSide: 'ally',
-      targeting: { active: false, sourceCard: null, filter: null, confirm: null, prompt: '', cancelNotice: '' },
+      targetingState: {
+        active: false,
+        sourceCard: null,
+        targetCount: 1,
+        selectedTargets: [],
+        filterRule: null,
+        canCancel: true,
+        onConfirm: null,
+        prompt: '',
+        cancelNotice: ''
+      },
       usedJinnangCountThisGame: 0,
       spentHufuThisTurn: 0,
       globalModifiers: {
@@ -985,10 +995,10 @@
       yuejiu: [{ event: GAME_EVENTS.ON_PLAY, tag: 'BUFF_LEFTMOST_BY_FORCE', params: { attack: 3, health: 3 } }],
       yanfuren: [{ event: GAME_EVENTS.ON_PLAY, tag: 'TARGET_ADD_LIEREN', params: { prompt: '严夫人当先：请选择1名友方，使其获得【烈刃】。', cancelNotice: '严夫人当先已取消，本次当先未完成，请重新发起。' } }],
       gexuan: [{ event: GAME_EVENTS.ON_PLAY, tag: 'TARGET_RECRUIT_END_BUFF', params: { attack: 2, health: 2, prompt: '葛玄当先：请选择1名友方，使其在每次招募结束时永久 +2/+2。', cancelNotice: '葛玄当先已取消，本次当先未完成，请重新发起。' } }],
-      simahui: [{ event: GAME_EVENTS.ON_PLAY, tag: 'TARGET_TRANSFORM_HIGHER', params: { prompt: '司马徽当先：请选择1名友方，将其变化为更高阶武将（原型以随机更强武将模拟）。', cancelNotice: '司马徽当先已取消，本次当先未完成，请重新发起。' } }],
+      simahui: [{ event: GAME_EVENTS.ON_PLAY, tag: 'TARGET_TRANSFORM_HIGHER', params: { prompt: '司马徽当先：请选择1名友方，将其变化为更高阶武将（原型以随机更强武将模拟）。', cancelNotice: '司马徽当先已取消，本次当先未完成，请重新发起。', onNoTarget: '司马徽当先未找到可选目标，效果未生效。' } }],
       zuoci: [{ event: GAME_EVENTS.ON_PLAY, tag: 'TARGET_GOLDENIZE', params: { prompt: '左慈当先：请选择1名友方，将其变为金色。', cancelNotice: '左慈当先已取消，本次当先未完成，请重新发起。', onNoTarget: '左慈当先未找到可选目标（可能均已金色），效果未生效。' } }],
       huangyueying: [{ event: GAME_EVENTS.ON_PLAY, tag: 'TARGET_SCALE_BY_JINNANG', params: { baseDelta: 2, prompt: '黄月英当先：请选择1名友方。' } }],
-      zhaozhong: [{ event: GAME_EVENTS.ON_PLAY, tag: 'TARGET_SCALE_BY_HUFU', params: { baseDelta: 2, prompt: '赵忠当先：请选择1名友方。' } }],
+      zhaozhong: [{ event: GAME_EVENTS.ON_PLAY, tag: 'TARGET_SCALE_BY_HUFU', params: { baseDelta: 2, prompt: '赵忠当先：请选择1名友方。', onNoTarget: '赵忠当先未找到可选目标，效果未生效。' } }],
       dingfeng: [{ event: GAME_EVENTS.ON_PLAY, tag: 'TARGET_REMOVE_GAIN_MONEY', params: { gain: 3, prompt: '丁奉当先：请选择1名友方移除并获得 3 虎符。', cancelNotice: '丁奉当先已取消，本次当先未完成，请重新发起。', onNoTarget: '丁奉当先未找到可移除目标，效果未生效。' } }],
       chengyuanzhi: [{ event: GAME_EVENTS.ON_PLAY, tag: 'CHENGYUANZHI_SUMMON' }],
       wulan: [{ event: GAME_EVENTS.ON_PLAY, tag: 'SUMMON_LEITONG' }]
@@ -1154,58 +1164,75 @@
     }
 
     function hasActiveTargeting() {
-      return state.targeting.active === true;
+      return state.targetingState.active === true;
     }
 
     function setTargetingActiveUi(active) {
-      elements.cancelTargetBtn.classList.toggle('active', active);
+      const cancelEnabled = active && state.targetingState.canCancel !== false;
+      elements.cancelTargetBtn.classList.toggle('active', cancelEnabled);
+      elements.cancelTargetBtn.disabled = !cancelEnabled;
       elements.app.classList.toggle('targeting-active', active);
     }
 
     function clearTargeting() {
-      state.targeting.active = false;
-      state.targeting.sourceCard = null;
-      state.targeting.filter = null;
-      state.targeting.confirm = null;
-      state.targeting.prompt = '';
-      state.targeting.cancelNotice = '';
+      state.targetingState.active = false;
+      state.targetingState.sourceCard = null;
+      state.targetingState.targetCount = 1;
+      state.targetingState.selectedTargets = [];
+      state.targetingState.filterRule = null;
+      state.targetingState.canCancel = true;
+      state.targetingState.onConfirm = null;
+      state.targetingState.prompt = '';
+      state.targetingState.cancelNotice = '';
       setTargetingActiveUi(false);
     }
 
     function cancelTargeting(customMessage = '') {
       if (!hasActiveTargeting()) return;
-      const message = customMessage || state.targeting.cancelNotice || '已取消选目标，本次上阵技能未完成。';
+      if (state.targetingState.canCancel === false) return setStatus('当前选目标不可取消，请完成目标选择。');
+      const message = customMessage || state.targetingState.cancelNotice || '已取消选目标，本次上阵技能未完成。';
       clearTargeting();
       renderRecruit();
       setStatus(message);
     }
 
-    function startTargeting({ sourceCard, filter, confirm, prompt, cancelNotice }) {
-      state.targeting.active = true;
-      state.targeting.sourceCard = sourceCard;
-      state.targeting.filter = typeof filter === 'function' ? filter : () => true;
-      state.targeting.confirm = typeof confirm === 'function' ? confirm : null;
-      state.targeting.prompt = prompt || `请选择 ${sourceCard.displayName} 的目标。`;
-      state.targeting.cancelNotice = cancelNotice || `${sourceCard.displayName} 的目标选择已取消，本次效果未结算。`;
+    function startTargeting({ sourceCard, targetCount = 1, filterRule, canCancel = true, onConfirm, prompt, cancelNotice }) {
+      state.targetingState.active = true;
+      state.targetingState.sourceCard = sourceCard;
+      state.targetingState.targetCount = Math.max(1, Number(targetCount) || 1);
+      state.targetingState.selectedTargets = [];
+      state.targetingState.filterRule = typeof filterRule === 'function' ? filterRule : () => true;
+      state.targetingState.canCancel = canCancel !== false;
+      state.targetingState.onConfirm = typeof onConfirm === 'function' ? onConfirm : null;
+      state.targetingState.prompt = prompt || `请选择 ${sourceCard.displayName} 的目标。`;
+      state.targetingState.cancelNotice = cancelNotice || `${sourceCard.displayName} 的目标选择已取消，本次效果未结算。`;
       setTargetingActiveUi(true);
       renderRecruit();
-      setStatus(state.targeting.prompt);
+      setStatus(state.targetingState.prompt);
     }
 
     function canSelectCurrentTarget(card) {
-      if (!hasActiveTargeting() || !card || typeof state.targeting.filter !== 'function') return false;
-      return state.targeting.filter(card, state.targeting.sourceCard, state);
+      if (!hasActiveTargeting() || !card || typeof state.targetingState.filterRule !== 'function') return false;
+      return state.targetingState.filterRule(card, state.targetingState.sourceCard, state);
     }
 
     function selectTarget(instanceId) {
       if (!hasActiveTargeting()) return;
       const target = state.boardCards.find((card) => card.instanceId === instanceId);
       if (!target) return;
-      if (!canSelectCurrentTarget(target)) return setStatus(`目标不合法：${target.displayName} 不是该技能可选目标，请重新选择。`);
-      const sourceCard = state.targeting.sourceCard;
-      const confirm = state.targeting.confirm;
+      if (!canSelectCurrentTarget(target)) return;
+      const sourceCard = state.targetingState.sourceCard;
+      const confirm = state.targetingState.onConfirm;
+      const targetCount = state.targetingState.targetCount;
+      const selectedTargets = [...state.targetingState.selectedTargets, target];
+      if (selectedTargets.length < targetCount) {
+        state.targetingState.selectedTargets = selectedTargets;
+        renderRecruit();
+        setStatus(`${state.targetingState.prompt}（已选择 ${selectedTargets.length}/${targetCount}）`);
+        return;
+      }
       clearTargeting();
-      if (typeof confirm === 'function') confirm(target, sourceCard, state);
+      if (typeof confirm === 'function') confirm(targetCount === 1 ? selectedTargets[0] : selectedTargets, sourceCard, state);
       renderRecruit();
     }
 
@@ -1243,13 +1270,14 @@
       return keywords;
     }
 
-    function startOnPlayTargeting(sourceCard, { prompt, cancelNotice, filter, confirm, onNoTarget }) {
-      const hasValidTarget = state.boardCards.some((unit) => filter(unit, sourceCard, state));
+    function startOnPlayTargeting(sourceCard, { prompt, cancelNotice, targetCount = 1, canCancel = true, filterRule, onConfirm, onNoTarget }) {
+      const finalFilterRule = typeof filterRule === 'function' ? filterRule : () => true;
+      const hasValidTarget = state.boardCards.some((unit) => finalFilterRule(unit, sourceCard, state));
       if (!hasValidTarget) {
         if (typeof onNoTarget === 'function') onNoTarget(sourceCard, state);
         return true;
       }
-      startTargeting({ sourceCard, prompt, cancelNotice, filter, confirm });
+      startTargeting({ sourceCard, targetCount, filterRule: finalFilterRule, canCancel, onConfirm, prompt, cancelNotice });
       return false;
     }
 
@@ -1277,15 +1305,15 @@
       TARGET_BUFF_OTHER: (card, params = {}) => startOnPlayTargeting(card, {
         prompt: params.prompt,
         cancelNotice: params.cancelNotice,
-        filter: (target, source) => target.instanceId !== source.instanceId,
-        confirm: (target) => { applyStatBuff(target, Number(params.attack || 0), Number(params.health || 0)); setStatus(`刘备鼓舞了 ${target.displayName}，其获得 +${Number(params.attack || 0)}/+${Number(params.health || 0)}。`); },
+        filterRule: (target, source) => target.instanceId !== source.instanceId,
+        onConfirm: (target) => { applyStatBuff(target, Number(params.attack || 0), Number(params.health || 0)); setStatus(`刘备鼓舞了 ${target.displayName}，其获得 +${Number(params.attack || 0)}/+${Number(params.health || 0)}。`); },
         onNoTarget: () => setStatus(params.onNoTarget || '未找到可选目标。')
       }) ? { resolved: true } : { resolved: false },
       TARGET_BUFF_OTHER_ADD_TAUNT: (card, params = {}) => startOnPlayTargeting(card, {
         prompt: params.prompt,
         cancelNotice: params.cancelNotice,
-        filter: (target, source) => target.instanceId !== source.instanceId,
-        confirm: (target) => { applyStatBuff(target, Number(params.attack || 0), Number(params.health || 0)); target.hasTaunt = true; setStatus(`陶谦援助了 ${target.displayName}，其获得 +${Number(params.attack || 0)}/+${Number(params.health || 0)} 并附加【挑衅】。`); },
+        filterRule: (target, source) => target.instanceId !== source.instanceId,
+        onConfirm: (target) => { applyStatBuff(target, Number(params.attack || 0), Number(params.health || 0)); target.hasTaunt = true; setStatus(`陶谦援助了 ${target.displayName}，其获得 +${Number(params.attack || 0)}/+${Number(params.health || 0)} 并附加【挑衅】。`); },
         onNoTarget: () => setStatus(params.onNoTarget || '未找到可选目标。')
       }) ? { resolved: true } : { resolved: false },
       TARGET_BOUNCE_OTHER: (card, params = {}) => {
@@ -1293,8 +1321,8 @@
         return startOnPlayTargeting(card, {
           prompt: params.prompt,
           cancelNotice: params.cancelNotice,
-          filter: (target, source) => target.instanceId !== source.instanceId && target.baseName !== source.baseName,
-          confirm: (target) => { state.boardCards = state.boardCards.filter((unit) => unit.instanceId !== target.instanceId); state.handCards.push(target); setStatus(`陈珪使 ${target.displayName} 返回手牌。`); },
+          filterRule: (target, source) => target.instanceId !== source.instanceId && target.baseName !== source.baseName,
+          onConfirm: (target) => { state.boardCards = state.boardCards.filter((unit) => unit.instanceId !== target.instanceId); state.handCards.push(target); setStatus(`陈珪使 ${target.displayName} 返回手牌。`); },
           onNoTarget: () => setStatus(params.onNoTarget || '未找到可选目标。')
         }) ? { resolved: true } : { resolved: false };
       },
@@ -1323,37 +1351,37 @@
         return { statusMessage: `乐就当先：按棋盘顺序为每种势力首个单位施加 +${Number(params.attack || 0)}/+${Number(params.health || 0)}，实际命中 ${targets.length} 个单位。` };
       },
       TARGET_ADD_LIEREN: (card, params = {}) => startOnPlayTargeting(card, {
-        prompt: params.prompt, cancelNotice: params.cancelNotice, filter: (target) => Boolean(target),
-        confirm: (target) => { target.lierenStacks = (target.lierenStacks || 0) + 1; grantSkillTrigger(target, GAME_EVENTS.ON_DAMAGE_DEALT, 'LIEREN_STACK', { attack: 1, health: 1 }); setStatus(`严夫人令 ${target.displayName} 获得【烈刃】。`); }
+        prompt: params.prompt, cancelNotice: params.cancelNotice, filterRule: (target) => Boolean(target),
+        onConfirm: (target) => { target.lierenStacks = (target.lierenStacks || 0) + 1; grantSkillTrigger(target, GAME_EVENTS.ON_DAMAGE_DEALT, 'LIEREN_STACK', { attack: 1, health: 1 }); setStatus(`严夫人令 ${target.displayName} 获得【烈刃】。`); }
       }) ? { resolved: true } : { resolved: false },
       TARGET_RECRUIT_END_BUFF: (card, params = {}) => startOnPlayTargeting(card, {
-        prompt: params.prompt, cancelNotice: params.cancelNotice, filter: (target) => Boolean(target),
-        confirm: (target) => { target.recruitEndBuff = target.recruitEndBuff || { attack: 0, health: 0 }; target.recruitEndBuff.attack += Number(params.attack || 0); target.recruitEndBuff.health += Number(params.health || 0); setStatus(`葛玄赐福 ${target.displayName}：后续每次招募结束时永久 +${Number(params.attack || 0)}/+${Number(params.health || 0)}。`); }
+        prompt: params.prompt, cancelNotice: params.cancelNotice, filterRule: (target) => Boolean(target),
+        onConfirm: (target) => { target.recruitEndBuff = target.recruitEndBuff || { attack: 0, health: 0 }; target.recruitEndBuff.attack += Number(params.attack || 0); target.recruitEndBuff.health += Number(params.health || 0); setStatus(`葛玄赐福 ${target.displayName}：后续每次招募结束时永久 +${Number(params.attack || 0)}/+${Number(params.health || 0)}。`); }
       }) ? { resolved: true } : { resolved: false },
       TARGET_TRANSFORM_HIGHER: (card, params = {}) => startOnPlayTargeting(card, {
-        prompt: params.prompt, cancelNotice: params.cancelNotice, filter: (target, source) => target.instanceId !== source.instanceId,
-        confirm: (target) => { const idx = state.boardCards.findIndex((unit) => unit.instanceId === target.instanceId); if (idx === -1) return; const newCard = getRandomCardByTierBoost(2); if (!newCard) return setStatus('司马徽当先触发失败：未抽到可用武将。'); newCard.instanceId = target.instanceId; state.boardCards[idx] = newCard; setStatus(`司马徽将 ${target.displayName} 变化为 ${newCard.displayName}（强化形态）。`); }
+        prompt: params.prompt, cancelNotice: params.cancelNotice, filterRule: (target, source) => target.instanceId !== source.instanceId,
+        onConfirm: (target) => { const idx = state.boardCards.findIndex((unit) => unit.instanceId === target.instanceId); if (idx === -1) return; const newCard = getRandomCardByTierBoost(2); if (!newCard) return setStatus('司马徽当先触发失败：未抽到可用武将。'); newCard.instanceId = target.instanceId; state.boardCards[idx] = newCard; setStatus(`司马徽将 ${target.displayName} 变化为 ${newCard.displayName}（强化形态）。`); }
       }) ? { resolved: true } : { resolved: false },
       TARGET_GOLDENIZE: (card, params = {}) => startOnPlayTargeting(card, {
-        prompt: params.prompt, cancelNotice: params.cancelNotice, filter: (target) => !target.isGolden,
-        confirm: (target) => { target.isGolden = true; applyStatBuff(target, 2, 2); setStatus(`左慈点化了 ${target.displayName}，其成为【金色】并获得 +2/+2。`); },
+        prompt: params.prompt, cancelNotice: params.cancelNotice, filterRule: (target) => !target.isGolden,
+        onConfirm: (target) => { target.isGolden = true; applyStatBuff(target, 2, 2); setStatus(`左慈点化了 ${target.displayName}，其成为【金色】并获得 +2/+2。`); },
         onNoTarget: () => setStatus(params.onNoTarget || '未找到可选目标。')
       }) ? { resolved: true } : { resolved: false },
       TARGET_SCALE_BY_JINNANG: (card, params = {}) => startOnPlayTargeting(card, {
         prompt: `${params.prompt} 当前本局锦囊数 ${state.usedJinnangCountThisGame}，将获得基础 +${Number(params.baseDelta || 0)}/+${Number(params.baseDelta || 0)} 与额外加成。`,
         cancelNotice: '黄月英当先已取消，本次当先未完成，请重新发起。',
-        filter: (target) => Boolean(target),
-        confirm: (target) => { const extra = Math.floor(state.usedJinnangCountThisGame / 2); const delta = Number(params.baseDelta || 0) + extra; applyStatBuff(target, delta, delta); setStatus(`黄月英强化了 ${target.displayName}：+${delta}/+${delta}（含锦囊额外 +${extra}/+${extra}）。`); }
+        filterRule: (target) => Boolean(target),
+        onConfirm: (target) => { const extra = Math.floor(state.usedJinnangCountThisGame / 2); const delta = Number(params.baseDelta || 0) + extra; applyStatBuff(target, delta, delta); setStatus(`黄月英强化了 ${target.displayName}：+${delta}/+${delta}（含锦囊额外 +${extra}/+${extra}）。`); }
       }) ? { resolved: true } : { resolved: false },
       TARGET_SCALE_BY_HUFU: (card, params = {}) => startOnPlayTargeting(card, {
         prompt: `${params.prompt} 当前本回合花费虎符 ${state.spentHufuThisTurn}，将获得基础 +${Number(params.baseDelta || 0)}/+${Number(params.baseDelta || 0)} 与额外加成。`,
         cancelNotice: '赵忠当先已取消，本次当先未完成，请重新发起。',
-        filter: (target) => Boolean(target),
-        confirm: (target) => { const extra = Math.floor(state.spentHufuThisTurn / 2); const delta = Number(params.baseDelta || 0) + extra; applyStatBuff(target, delta, delta); setStatus(`赵忠强化了 ${target.displayName}：+${delta}/+${delta}（含虎符额外 +${extra}/+${extra}）。`); }
+        filterRule: (target) => Boolean(target),
+        onConfirm: (target) => { const extra = Math.floor(state.spentHufuThisTurn / 2); const delta = Number(params.baseDelta || 0) + extra; applyStatBuff(target, delta, delta); setStatus(`赵忠强化了 ${target.displayName}：+${delta}/+${delta}（含虎符额外 +${extra}/+${extra}）。`); }
       }) ? { resolved: true } : { resolved: false },
       TARGET_REMOVE_GAIN_MONEY: (card, params = {}) => startOnPlayTargeting(card, {
-        prompt: params.prompt, cancelNotice: params.cancelNotice, filter: (target, source) => target.instanceId !== source.instanceId,
-        confirm: (target) => { state.boardCards = state.boardCards.filter((unit) => unit.instanceId !== target.instanceId); state.money += Number(params.gain || 0); setStatus(`丁奉移除了 ${target.displayName}，获得 ${Number(params.gain || 0)} 虎符。`); },
+        prompt: params.prompt, cancelNotice: params.cancelNotice, filterRule: (target, source) => target.instanceId !== source.instanceId,
+        onConfirm: (target) => { state.boardCards = state.boardCards.filter((unit) => unit.instanceId !== target.instanceId); state.money += Number(params.gain || 0); setStatus(`丁奉移除了 ${target.displayName}，获得 ${Number(params.gain || 0)} 虎符。`); },
         onNoTarget: () => setStatus(params.onNoTarget || '未找到可选目标。')
       }) ? { resolved: true } : { resolved: false },
       CHENGYUANZHI_SUMMON: (card) => {
@@ -1606,7 +1634,7 @@
         article.addEventListener('dragend', endDrag);
       }
       if (source === 'board' && hasActiveTargeting()) {
-        if (state.targeting.sourceCard && state.targeting.sourceCard.instanceId === card.instanceId) article.classList.add('target-source');
+        if (state.targetingState.sourceCard && state.targetingState.sourceCard.instanceId === card.instanceId) article.classList.add('target-source');
         if (canSelectCurrentTarget(card)) article.classList.add('targetable');
       }
       if (source === 'board') {
