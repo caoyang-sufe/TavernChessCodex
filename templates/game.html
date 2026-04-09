@@ -1018,6 +1018,22 @@
       return `${actorName}当先：部分获得（手牌已满，实际获得 ${added} 张）。`;
     }
 
+    function addCardsToHand(cardDefs) {
+      const cards = Array.isArray(cardDefs) ? cardDefs : [];
+      const requested = cards.length;
+      const available = Math.max(0, CARD_LIMITS.hand - state.handCards.length);
+      const acceptedDefs = cards.slice(0, available);
+      const addedCards = acceptedDefs.map((card) => instantiateCard(card));
+      state.handCards.push(...addedCards);
+      return { requested, added: addedCards.length };
+    }
+
+    function buildGainCardsStatus(actorName, requested, added) {
+      if (requested <= 0) return `${actorName}当先未找到可获得的牌。`;
+      if (added === requested) return `${actorName}当先：全部获得，共获得 ${added} 张牌。`;
+      return `${actorName}当先：部分获得（手牌已满，实际获得 ${added} 张）。`;
+    }
+
     function clearRecruitTimer() {
       if (state.timerId) { clearInterval(state.timerId); state.timerId = null; }
     }
