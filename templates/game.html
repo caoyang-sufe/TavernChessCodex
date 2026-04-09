@@ -1139,6 +1139,16 @@
       return card;
     }
 
+    function getActiveMihengTier() {
+      let highestTier = 0;
+      state.boardCards.forEach((unit) => {
+        if (unit.baseName !== 'miheng') return;
+        const tier = unit.isGolden || unit.type === 'gold' ? 2 : 1;
+        if (tier > highestTier) highestTier = tier;
+      });
+      return highestTier;
+    }
+
     function getCardKeywords(card, source) {
       if (!(source === 'board' || source === 'ally-battle')) return [];
       const keywords = [];
@@ -1495,7 +1505,14 @@
         return setStatus(`锦囊牌 ${card.displayName} 不能上阵到战场。`);
       }
       state.boardCards.push(card);
-      triggerOnPlay(card);
+      const activeMihengTier = getActiveMihengTier();
+      const extraOnPlayTimes = activeMihengTier === 2 ? 2 : activeMihengTier === 1 ? 1 : 0;
+      if (activeMihengTier > 0) appendBattleLog(`祢衡唯一效果生效（${activeMihengTier === 2 ? '金色' : '普通'}）`);
+      const totalTriggerTimes = 1 + extraOnPlayTimes;
+      for (let i = 0; i < totalTriggerTimes; i++) {
+        const isResolved = triggerOnPlay(card);
+        if (!isResolved) break;
+      }
       renderRecruit();
     }
 
