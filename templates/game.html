@@ -914,6 +914,7 @@
     const START_MONEY = 100;
     const TURN_DURATION = 120;
     const BATTLE_STEP_MS = 950;
+    const LEIBO_FORCE_POOL = ['魏', '蜀', '吴', '群', '黄巾', '汉', '西凉', '袁'];
 
     const cardDefs = JSON.parse(document.getElementById('card-defs').textContent);
     const spellDefs = JSON.parse(document.getElementById('spell-defs').textContent);
@@ -1018,20 +1019,18 @@
       return `${actorName}当先：部分获得（手牌已满，实际获得 ${added} 张）。`;
     }
 
-    function addCardsToHand(cardDefs) {
-      const cards = Array.isArray(cardDefs) ? cardDefs : [];
-      const requested = cards.length;
-      const available = Math.max(0, CARD_LIMITS.hand - state.handCards.length);
-      const acceptedDefs = cards.slice(0, available);
-      const addedCards = acceptedDefs.map((card) => instantiateCard(card));
-      state.handCards.push(...addedCards);
-      return { requested, added: addedCards.length };
-    }
-
-    function buildGainCardsStatus(actorName, requested, added) {
-      if (requested <= 0) return `${actorName}当先未找到可获得的牌。`;
-      if (added === requested) return `${actorName}当先：全部获得，共获得 ${added} 张牌。`;
-      return `${actorName}当先：部分获得（手牌已满，实际获得 ${added} 张）。`;
+    function getLeiboGainCandidate() {
+      const forcesOnBoard = new Set(
+        state.boardCards
+          .map((unit) => unit.force)
+          .filter((force) => LEIBO_FORCE_POOL.includes(force))
+      );
+      const missingForces = LEIBO_FORCE_POOL.filter((force) => !forcesOnBoard.has(force));
+      if (missingForces.length <= 0) return null;
+      const chosenForce = sampleCards(1, missingForces)[0];
+      const forcePool = cardPool.filter((unit) => unit.kind === 'general' && unit.type === 'normal' && unit.force === chosenForce);
+      if (forcePool.length <= 0) return null;
+      return sampleCards(1, forcePool)[0] || null;
     }
 
     function clearRecruitTimer() {
@@ -1215,6 +1214,21 @@
         const gainDefs = sampleCards(1, spellDefs);
         const gainResult = addCardsToHand(gainDefs);
         setStatus(buildGainCardsStatus('黄承彦', gainResult.requested, gainResult.added));
+        return true;
+      }
+      if (card.baseName === 'leibo') {
+        const candidate = getLeiboGainCandidate();
+        const gainDefs = candidate ? [candidate] : [];
+        const gainResult = addCardsToHand(gainDefs);
+        if (!candidate) {
+          setStatus('雷薄当先：上阵区域已覆盖全部可选势力（不含神）或无可用卡牌，未获得武将牌。');
+          return true;
+        }
+        if (gainResult.added === gainResult.requested) {
+          setStatus(`雷薄当先：获得 1 张${candidate.force}势力武将牌（${candidate.displayName}）。`);
+          return true;
+        }
+        setStatus(`雷薄当先：部分获得（手牌已满，实际获得 ${gainResult.added} 张）。`);
         return true;
       }
       if (card.baseName === 'yanfuren') {
