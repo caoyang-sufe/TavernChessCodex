@@ -214,6 +214,14 @@
       outline-offset: 2px;
     }
 
+    .card-keyword {
+      margin: 6px 0 0;
+      font-size: 12px;
+      color: var(--ally);
+      font-weight: 700;
+      letter-spacing: 0.04em;
+    }
+
     .recruit-layout {
       display: grid;
       grid-template-columns: minmax(0, 1fr) 220px;
@@ -942,7 +950,7 @@
     }
 
     function instantiateCard(card) {
-      return { ...card, instanceId: state.nextId++, currentHealth: card.health, isAttacking: false, isDamaged: false, isDead: false };
+      return { ...card, instanceId: state.nextId++, currentHealth: card.health, hasTaunt: Boolean(card.hasTaunt), isAttacking: false, isDamaged: false, isDead: false };
     }
 
     function clearRecruitTimer() {
@@ -1046,7 +1054,8 @@
             target.attack += 1;
             target.health += 3;
             target.currentHealth += 3;
-            setStatus(`陶谦援助了 ${target.displayName}，其获得 +1/+3。`);
+            target.hasTaunt = true;
+            setStatus(`陶谦援助了 ${target.displayName}，其获得 +1/+3 并附加【挑衅】。`);
           }
         });
         return false;
@@ -1255,6 +1264,7 @@
       if (card.isDamaged) article.classList.add('damaged');
       if (card.isDead) article.classList.add('dead');
       const variantText = card.variant ? `变体 ${card.variant}` : '基础版';
+      const keywordText = card.hasTaunt && (source === 'board' || source === 'ally-battle') ? '<p class="card-keyword">挑衅</p>' : '';
       let actionButton = '';
       if (state.phase === 'recruit') {
         if (source === 'shop') actionButton = '<button class="mini-btn success" type="button">购买 -3</button>';
@@ -1277,6 +1287,7 @@
         <div class="card-body">
           <h3 class="card-name">${card.displayName}</h3>
           <p class="card-meta">${card.fileName}</p>
+          ${keywordText}
         </div>
         ${actionButton ? `<div class="card-actions">${actionButton}</div>` : ''}
       `;
