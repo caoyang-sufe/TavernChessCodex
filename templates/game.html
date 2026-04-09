@@ -783,7 +783,7 @@
           <div class="zone-header">
             <div class="zone-title">
               <h2>商店</h2>
-              <p>每次刷新随机展示 6 张卡。购买花费 3 金币，可拖到手牌区或点击按钮购买。</p>
+              <p>每次刷新随机展示 6 张卡。刷新花费 1 金币，购买花费 3 金币，可拖到手牌区或点击按钮购买。</p>
             </div>
             <div class="zone-meta">
               <span class="zone-badge">固定 6 格</span>
@@ -911,6 +911,7 @@
     const CARD_LIMITS = { shop: 6, board: 7, hand: 10 };
     const BUY_PRICE = 3;
     const SELL_PRICE = 1;
+    const REFRESH_PRICE = 1;
     const START_MONEY = 100;
     const TURN_DURATION = 120;
     const BATTLE_STEP_MS = 950;
@@ -1374,10 +1375,14 @@
     }
 
     function refreshShop(showStatus = true) {
+      if (showStatus) {
+        if (state.money < REFRESH_PRICE) return setStatus(`金币不足，刷新商店需要 ${REFRESH_PRICE} 金币。`);
+        spendHufu(REFRESH_PRICE);
+      }
       state.shopCards = sampleCards(CARD_LIMITS.shop);
       state.refreshCount += 1;
       renderRecruit();
-      if (showStatus) setStatus(`商店已刷新，第 ${state.refreshCount} 次，共出现 6 张随机卡牌。`);
+      if (showStatus) setStatus(`商店已刷新（花费 ${REFRESH_PRICE} 金币），第 ${state.refreshCount} 次，共出现 6 张随机卡牌。`);
     }
 
     function cloneForBattle(card) {
