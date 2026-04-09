@@ -917,6 +917,13 @@
     const BATTLE_STEP_MS = 950;
     const LEIBO_FORCE_POOL = ['魏', '蜀', '吴', '群', '黄巾', '汉', '西凉', '袁'];
     const TOKEN_BASE_NAMES = new Set(['leitong', 'dongxi', 'huochuan', 'huangjinbing']);
+    const UNIQUE_EFFECT_VERSION = Object.freeze({ NONE: 0, NORMAL: 1, GOLD: 2 });
+    const UNIQUE_EFFECT_CONFIG = Object.freeze({
+      miheng: {
+        effectLabel: '祢衡唯一效果',
+        getExtraOnPlayTimes: (version) => (version === UNIQUE_EFFECT_VERSION.GOLD ? 2 : version === UNIQUE_EFFECT_VERSION.NORMAL ? 1 : 0)
+      }
+    });
 
     const cardDefs = JSON.parse(document.getElementById('card-defs').textContent);
     const spellDefs = JSON.parse(document.getElementById('spell-defs').textContent);
@@ -1257,14 +1264,30 @@
       return card;
     }
 
-    function getActiveMihengTier() {
-      let highestTier = 0;
-      state.boardCards.forEach((unit) => {
-        if (unit.baseName !== 'miheng') return;
-        const tier = unit.isGolden || unit.type === 'gold' ? 2 : 1;
-        if (tier > highestTier) highestTier = tier;
-      });
-      return highestTier;
+    function getUnitsBySide(side = 'ally') {
+      if (side === 'enemy') return state.enemyBoardCards;
+      return state.boardCards;
+    }
+
+    function getUniqueEffectVersionName(version) {
+      if (version === UNIQUE_EFFECT_VERSION.GOLD) return '金色';
+      if (version === UNIQUE_EFFECT_VERSION.NORMAL) return '普通';
+      return '未生效';
+    }
+
+    function resolveUniqueEffect(cardName, side = 'ally') {
+      const units = getUnitsBySide(side);
+      const sameNameUnits = units.filter((unit) => unit?.baseName === cardName);
+      if (sameNameUnits.length <= 0) return { cardName, side, activeVersion: UNIQUE_EFFECT_VERSION.NONE, activeUnit: null, sameNameCount: 0 };
+      const activeUnit = sameNameUnits.reduce((best, current) => {
+        if (!best) return current;
+        const bestTier = best.isGolden || best.type === 'gold' ? UNIQUE_EFFECT_VERSION.GOLD : UNIQUE_EFFECT_VERSION.NORMAL;
+        const currentTier = current.isGolden || current.type === 'gold' ? UNIQUE_EFFECT_VERSION.GOLD : UNIQUE_EFFECT_VERSION.NORMAL;
+        if (currentTier > bestTier) return current;
+        return best;
+      }, null);
+      const activeVersion = activeUnit && (activeUnit.isGolden || activeUnit.type === 'gold') ? UNIQUE_EFFECT_VERSION.GOLD : UNIQUE_EFFECT_VERSION.NORMAL;
+      return { cardName, side, activeVersion, activeUnit, sameNameCount: sameNameUnits.length };
     }
 
     function getCardKeywords(card, source) {
@@ -1588,9 +1611,14 @@
         return setStatus(`锦囊牌 ${card.displayName} 不能上阵到战场。`);
       }
       state.boardCards.push(card);
-      const activeMihengTier = getActiveMihengTier();
-      const extraOnPlayTimes = activeMihengTier === 2 ? 2 : activeMihengTier === 1 ? 1 : 0;
-      if (activeMihengTier > 0) appendBattleLog(`祢衡唯一效果生效（${activeMihengTier === 2 ? '金色' : '普通'}）`);
+      const mihengEffect = resolveUniqueEffect('miheng', 'ally');
+      const mihengConfig = UNIQUE_EFFECT_CONFIG.miheng;
+      const extraOnPlayTimes = typeof mihengConfig?.getExtraOnPlayTimes === 'function'
+        ? mihengConfig.getExtraOnPlayTimes(mihengEffect.activeVersion)
+        : 0;
+      if (mihengEffect.activeVersion !== UNIQUE_EFFECT_VERSION.NONE) {
+        appendBattleLog(`${mihengConfig.effectLabel}生效（当前版本：${getUniqueEffectVersionName(mihengEffect.activeVersion)}；同名在场：${mihengEffect.sameNameCount}，仅生效一份）`);
+      }
       const totalTriggerTimes = 1 + extraOnPlayTimes;
       for (let i = 0; i < totalTriggerTimes; i++) {
         const result = triggerEvent(GAME_EVENTS.ON_PLAY, { sourceCard: card });
