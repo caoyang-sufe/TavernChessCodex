@@ -44,6 +44,7 @@
     .pager { margin-top: 12px; display: flex; gap: 12px; align-items: center; }
     .pager a { color: #7b431c; text-decoration: none; font-weight: 700; }
     .disabled { color: #b7a08b; }
+    .skill-term { color: #c11717; font-weight: 800; }
   </style>
 </head>
 <body>
@@ -68,7 +69,7 @@
                         <div class="stars">{{ item.stars }}</div>
                         <div class="type-tag">{{ item.type_name }}</div>
                         <div class="name">{{ item.name }}</div>
-                        <div class="skill">{{ item.skill }}</div>
+                        <div class="skill">{{ item.skill_html|safe }}</div>
                         <div class="force">{{ item.force }}</div>
                         <div class="atk">{{ item.attack }}</div>
                         <div class="hp">{{ item.health }}</div>
@@ -77,7 +78,7 @@
                       <div class="spell-head">{{ item.title }}</div>
                       <article class="spell-card">
                         <img src="{{ item.image_url }}" alt="{{ item.title }}">
-                        <div class="spell-skill">{{ item.skill }}</div>
+                        <div class="spell-skill">{{ item.skill_html|safe }}</div>
                       </article>
                     {% elif section.kind == 'weapon' %}
                       <article class="weapon-card">
@@ -85,7 +86,7 @@
                         <div class="weapon-meta">
                           <div class="line"><strong>名称：</strong>{{ item.name }}</div>
                           <div class="line"><strong>类型：</strong>{{ item.type_name }}</div>
-                          <div class="line"><strong>技能描述：</strong>{{ item.skill }}</div>
+                          <div class="line"><strong>技能描述：</strong>{{ item.skill_html|safe }}</div>
                         </div>
                       </article>
                     {% endif %}
