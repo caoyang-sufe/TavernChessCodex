@@ -1034,46 +1034,181 @@
       renderRecruit();
     }
 
+    function applyStatBuff(card, attackDelta, healthDelta) {
+      card.attack += attackDelta;
+      card.health += healthDelta;
+      card.currentHealth += healthDelta;
+    }
+
+    function getRandomCardByTierBoost(boost = 1) {
+      const candidate = sampleCards(1)[0];
+      if (!candidate) return null;
+      const card = instantiateCard(candidate);
+      applyStatBuff(card, boost, boost);
+      return card;
+    }
+
+    function getCardKeywords(card, source) {
+      if (!(source === 'board' || source === 'ally-battle')) return [];
+      const keywords = [];
+      if (card.hasTaunt) keywords.push('挑衅');
+      if (card.lierenStacks > 0) keywords.push(`烈刃×${card.lierenStacks}`);
+      if (card.recruitEndBuff && ((card.recruitEndBuff.attack || 0) !== 0 || (card.recruitEndBuff.health || 0) !== 0)) keywords.push(`招募后+${card.recruitEndBuff.attack || 0}/+${card.recruitEndBuff.health || 0}`);
+      if (card.isGolden) keywords.push('金色');
+      return keywords;
+    }
+
+    function startOnPlayTargeting(sourceCard, { prompt, cancelNotice, filter, confirm, onNoTarget }) {
+      const hasValidTarget = state.boardCards.some((unit) => filter(unit, sourceCard, state));
+      if (!hasValidTarget) {
+        if (typeof onNoTarget === 'function') onNoTarget(sourceCard, state);
+        return true;
+      }
+      startTargeting({ sourceCard, prompt, cancelNotice, filter, confirm });
+      return false;
+    }
+
     function triggerOnPlay(card) {
       if (card.baseName === 'mizhu') {
         state.boardCards.forEach((unit) => {
-          unit.attack += 1;
-          unit.health += 1;
-          unit.currentHealth += 1;
+          applyStatBuff(unit, 1, 1);
         });
         setStatus('糜竺上阵，场上所有卡牌获得 +1/+1。');
         return true;
       }
       if (card.baseName === 'liubei') {
-        startTargeting({
-          sourceCard: card,
+        return startOnPlayTargeting(card, {
           prompt: '刘备上阵：请选择另一名我方单位，使其获得 +2/+2（右键或点“取消选目标”可取消）。',
           cancelNotice: '刘备上阵技能已取消，本次当先未完成，请重新发起。',
           filter: (target, source) => target.instanceId !== source.instanceId,
           confirm: (target) => {
-            target.attack += 2;
-            target.health += 2;
-            target.currentHealth += 2;
+            applyStatBuff(target, 2, 2);
             setStatus(`刘备鼓舞了 ${target.displayName}，其获得 +2/+2。`);
-          }
+          },
+          onNoTarget: () => setStatus('刘备当先未找到可选目标，效果未生效。')
         });
-        return false;
       }
       if (card.baseName === 'taoqian') {
-        startTargeting({
-          sourceCard: card,
+        return startOnPlayTargeting(card, {
           prompt: '陶谦当先：请选择另一名我方单位，使其获得 +1/+3（右键或点“取消选目标”可取消）。',
           cancelNotice: '陶谦当先已取消，本次当先未完成，请重新发起。',
           filter: (target, source) => target.instanceId !== source.instanceId,
           confirm: (target) => {
-            target.attack += 1;
-            target.health += 3;
-            target.currentHealth += 3;
+            applyStatBuff(target, 1, 3);
             target.hasTaunt = true;
             setStatus(`陶谦援助了 ${target.displayName}，其获得 +1/+3 并附加【挑衅】。`);
+          },
+          onNoTarget: () => setStatus('陶谦当先未找到可选目标，效果未生效。')
+        });
+      }
+      if (card.baseName === 'chengui') {
+        if (state.handCards.length >= CARD_LIMITS.hand) {
+          setStatus('陈珪当先触发失败：手牌已满，无法将目标回手。');
+          return true;
+        }
+        return startOnPlayTargeting(card, {
+          prompt: '陈珪当先：请选择1个非同名友方，将其移回手牌。',
+          cancelNotice: '陈珪当先已取消，本次当先未完成，请重新发起。',
+          filter: (target, source) => target.instanceId !== source.instanceId && target.baseName !== source.baseName,
+          confirm: (target) => {
+            state.boardCards = state.boardCards.filter((unit) => unit.instanceId !== target.instanceId);
+            state.handCards.push(target);
+            setStatus(`陈珪使 ${target.displayName} 返回手牌。`);
+          },
+          onNoTarget: () => setStatus('陈珪当先未找到可选目标，效果未生效。')
+        });
+      }
+      if (card.baseName === 'yanfuren') {
+        return startOnPlayTargeting(card, {
+          prompt: '严夫人当先：请选择1名友方，使其获得【烈刃】。',
+          cancelNotice: '严夫人当先已取消，本次当先未完成，请重新发起。',
+          filter: (target) => Boolean(target),
+          confirm: (target) => {
+            target.lierenStacks = (target.lierenStacks || 0) + 1;
+            setStatus(`严夫人令 ${target.displayName} 获得【烈刃】。`);
           }
         });
-        return false;
+      }
+      if (card.baseName === 'gexuan') {
+        return startOnPlayTargeting(card, {
+          prompt: '葛玄当先：请选择1名友方，使其在每次招募结束时永久 +2/+2。',
+          cancelNotice: '葛玄当先已取消，本次当先未完成，请重新发起。',
+          filter: (target) => Boolean(target),
+          confirm: (target) => {
+            target.recruitEndBuff = target.recruitEndBuff || { attack: 0, health: 0 };
+            target.recruitEndBuff.attack += 2;
+            target.recruitEndBuff.health += 2;
+            setStatus(`葛玄赐福 ${target.displayName}：后续每次招募结束时永久 +2/+2。`);
+          }
+        });
+      }
+      if (card.baseName === 'simahui') {
+        return startOnPlayTargeting(card, {
+          prompt: '司马徽当先：请选择1名友方，将其变化为更高阶武将（原型以随机更强武将模拟）。',
+          cancelNotice: '司马徽当先已取消，本次当先未完成，请重新发起。',
+          filter: (target, source) => target.instanceId !== source.instanceId,
+          confirm: (target) => {
+            const idx = state.boardCards.findIndex((unit) => unit.instanceId === target.instanceId);
+            if (idx === -1) return;
+            const newCard = getRandomCardByTierBoost(2);
+            if (!newCard) return setStatus('司马徽当先触发失败：未抽到可用武将。');
+            newCard.instanceId = target.instanceId;
+            state.boardCards[idx] = newCard;
+            setStatus(`司马徽将 ${target.displayName} 变化为 ${newCard.displayName}（强化形态）。`);
+          }
+        });
+      }
+      if (card.baseName === 'zuoci') {
+        return startOnPlayTargeting(card, {
+          prompt: '左慈当先：请选择1名友方，将其变为金色。',
+          cancelNotice: '左慈当先已取消，本次当先未完成，请重新发起。',
+          filter: (target) => !target.isGolden,
+          confirm: (target) => {
+            target.isGolden = true;
+            applyStatBuff(target, 2, 2);
+            setStatus(`左慈点化了 ${target.displayName}，其成为【金色】并获得 +2/+2。`);
+          },
+          onNoTarget: () => setStatus('左慈当先未找到可选目标（可能均已金色），效果未生效。')
+        });
+      }
+      if (card.baseName === 'huangyueying') {
+        return startOnPlayTargeting(card, {
+          prompt: `黄月英当先：请选择1名友方。当前本局锦囊数 ${state.usedJinnangCountThisGame}，将获得基础 +2/+2 与额外加成。`,
+          cancelNotice: '黄月英当先已取消，本次当先未完成，请重新发起。',
+          filter: (target) => Boolean(target),
+          confirm: (target) => {
+            const extra = Math.floor(state.usedJinnangCountThisGame / 2);
+            const delta = 2 + extra;
+            applyStatBuff(target, delta, delta);
+            setStatus(`黄月英强化了 ${target.displayName}：+${delta}/+${delta}（含锦囊额外 +${extra}/+${extra}）。`);
+          }
+        });
+      }
+      if (card.baseName === 'zhaozhong') {
+        return startOnPlayTargeting(card, {
+          prompt: `赵忠当先：请选择1名友方。当前本回合花费虎符 ${state.spentHufuThisTurn}，将获得基础 +2/+2 与额外加成。`,
+          cancelNotice: '赵忠当先已取消，本次当先未完成，请重新发起。',
+          filter: (target) => Boolean(target),
+          confirm: (target) => {
+            const extra = Math.floor(state.spentHufuThisTurn / 2);
+            const delta = 2 + extra;
+            applyStatBuff(target, delta, delta);
+            setStatus(`赵忠强化了 ${target.displayName}：+${delta}/+${delta}（含虎符额外 +${extra}/+${extra}）。`);
+          }
+        });
+      }
+      if (card.baseName === 'dingfeng') {
+        return startOnPlayTargeting(card, {
+          prompt: '丁奉当先：请选择1名友方移除并获得 3 虎符。',
+          cancelNotice: '丁奉当先已取消，本次当先未完成，请重新发起。',
+          filter: (target, source) => target.instanceId !== source.instanceId,
+          confirm: (target) => {
+            state.boardCards = state.boardCards.filter((unit) => unit.instanceId !== target.instanceId);
+            state.money += 3;
+            setStatus(`丁奉移除了 ${target.displayName}，获得 3 虎符。`);
+          },
+          onNoTarget: () => setStatus('丁奉当先未找到可移除目标，效果未生效。')
+        });
       }
       setStatus(`${card.displayName} 已上阵。`);
       return true;
@@ -1122,6 +1257,12 @@
       state.battleTurn = 0;
       state.battleLog = ['战斗尚未开始。'];
       state.boardCards = state.boardCards.map((card) => ({ ...card, currentHealth: card.health, isAttacking: false, isDamaged: false, isDead: false }));
+      state.boardCards.forEach((card) => {
+        if (!card.recruitEndBuff) return;
+        const atk = card.recruitEndBuff.attack || 0;
+        const hp = card.recruitEndBuff.health || 0;
+        if (atk !== 0 || hp !== 0) applyStatBuff(card, atk, hp);
+      });
       startRecruitTimer();
       render();
     }
@@ -1282,7 +1423,8 @@
       if (card.isDamaged) article.classList.add('damaged');
       if (card.isDead) article.classList.add('dead');
       const variantText = card.variant ? `变体 ${card.variant}` : '基础版';
-      const keywordText = card.hasTaunt && (source === 'board' || source === 'ally-battle') ? '<p class="card-keyword">挑衅</p>' : '';
+      const keywordList = getCardKeywords(card, source);
+      const keywordText = keywordList.length > 0 ? `<p class="card-keyword">${keywordList.join(' · ')}</p>` : '';
       let actionButton = '';
       if (state.phase === 'recruit') {
         if (source === 'shop') actionButton = '<button class="mini-btn success" type="button">购买 -3</button>';
