@@ -916,6 +916,7 @@
     const TURN_DURATION = 120;
     const BATTLE_STEP_MS = 950;
     const LEIBO_FORCE_POOL = ['魏', '蜀', '吴', '群', '黄巾', '汉', '西凉', '袁'];
+    const TOKEN_BASE_NAMES = new Set(['leitong', 'dongxi', 'huochuan', 'huangjinbing']);
 
     const cardDefs = JSON.parse(document.getElementById('card-defs').textContent);
     const spellDefs = JSON.parse(document.getElementById('spell-defs').textContent);
@@ -944,6 +945,7 @@
         displayName: card.name || baseName.replace(/_/g, ' ')
       };
     });
+    const shopCardPool = cardPool.filter((card) => !TOKEN_BASE_NAMES.has(card.baseName));
 
     const state = {
       phase: 'recruit', shopCards: [], handCards: [], boardCards: [], enemyBoardCards: [], refreshCount: 0, nextId: 1,
@@ -1010,7 +1012,7 @@
 
     elements.cancelTargetBtn = document.getElementById('cancel-target-btn');
 
-    function sampleCards(count, sourcePool = cardPool) {
+    function sampleCards(count, sourcePool = shopCardPool) {
       const pool = [...sourcePool];
       for (let i = pool.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
@@ -1065,13 +1067,14 @@
       return instantiateCard({ ...cardDef });
     }
 
-    function summonToBoard(baseName, count, options = {}) {
-      const safeCount = Math.max(0, Number(count) || 0);
+    function summonToBoard(cards) {
+      const summonCards = Array.isArray(cards) ? cards.filter((card) => Boolean(card)) : [];
+      const safeCount = summonCards.length;
       const availableSlots = Math.max(0, CARD_LIMITS.board - state.boardCards.length);
       const actualCount = Math.min(safeCount, availableSlots);
       const summonedCards = [];
       for (let i = 0; i < actualCount; i++) {
-        const card = createSummonedInstance(baseName, options);
+        const card = summonCards[i];
         if (!card) break;
         summonedCards.push(card);
         state.boardCards.push(card);
@@ -1107,10 +1110,14 @@
       return { requested, added: addedCards.length };
     }
 
+    function formatPlannedActual(planned, actual, unit = '张') {
+      return `计划 ${planned} ${unit} / 实际 ${actual} ${unit}`;
+    }
+
     function buildGainCardsStatus(actorName, requested, added) {
       if (requested <= 0) return `${actorName}当先未找到可获得的牌。`;
-      if (added === requested) return `${actorName}当先：全部获得，共获得 ${added} 张牌。`;
-      return `${actorName}当先：部分获得（手牌已满，实际获得 ${added} 张）。`;
+      if (added === requested) return `${actorName}当先：获得成功（${formatPlannedActual(requested, added)}）。`;
+      return `${actorName}当先：获得受手牌上限影响（${formatPlannedActual(requested, added)}）。`;
     }
 
     function pickLeftmostByFaction(units) {
@@ -1342,8 +1349,7 @@
         const candidate = getLeiboGainCandidate();
         const gain = addCardsToHand(candidate ? [candidate] : []);
         if (!candidate) return { statusMessage: '雷薄当先：上阵区域已覆盖全部可选势力（不含神）或无可用卡牌，未获得武将牌。' };
-        if (gain.added === gain.requested) return { statusMessage: `雷薄当先：获得 1 张${candidate.force}势力武将牌（${candidate.displayName}）。` };
-        return { statusMessage: `雷薄当先：部分获得（手牌已满，实际获得 ${gain.added} 张）。` };
+        return { statusMessage: `雷薄当先：尝试获得 ${candidate.force}势力武将牌（${candidate.displayName}），${formatPlannedActual(gain.requested, gain.added)}。` };
       },
       BUFF_LEFTMOST_BY_FORCE: (card, params = {}) => {
         const targets = pickLeftmostByFaction(state.boardCards);
@@ -1388,15 +1394,17 @@
         const modifierDelta = (card.isGolden || card.type === 'gold') ? { atkBonus: 4, hpBonus: 2 } : { atkBonus: 2, hpBonus: 1 };
         state.globalModifiers.yellowTurban.atkBonus += modifierDelta.atkBonus;
         state.globalModifiers.yellowTurban.hpBonus += modifierDelta.hpBonus;
-        const summonResult = summonToBoard('huangjinbing', 1, { isGolden: Boolean(card.isGolden || card.type === 'gold') });
-        const summonStatus = summonResult.actualCount >= 1 ? `${summonResult.actualCount} 个黄巾兵已上阵` : '上阵区域已满，黄巾兵未能上阵';
+        const summonResult = summonToBoard([createSummonedInstance('huangjinbing', { isGolden: Boolean(card.isGolden || card.type === 'gold') })]);
+        const summonStatus = summonResult.actualCount >= 1
+          ? `黄巾兵上阵完成（${formatPlannedActual(summonResult.requestedCount, summonResult.actualCount, '名')}）`
+          : `上阵区域已满，黄巾兵未能上阵（${formatPlannedActual(summonResult.requestedCount, summonResult.actualCount, '名')}）`;
         return { statusMessage: `程远志当先：本局黄巾兵加成更新为 +${state.globalModifiers.yellowTurban.atkBonus}/+${state.globalModifiers.yellowTurban.hpBonus}，${summonStatus}。` };
       },
       SUMMON_LEITONG: (card) => {
         const summonCount = (card.isGolden || card.type === 'gold') ? 2 : 1;
-        const summonResult = summonToBoard('leitong', summonCount);
-        if (summonResult.actualCount === summonCount) return { statusMessage: `吴兰当先：上阵 ${summonResult.actualCount} 个雷铜。` };
-        return { statusMessage: `吴兰当先：尝试上阵 ${summonCount} 个雷铜，受空位限制实际上阵 ${summonResult.actualCount} 个。` };
+        const summonCards = Array.from({ length: summonCount }, () => createSummonedInstance('leitong'));
+        const summonResult = summonToBoard(summonCards);
+        return { statusMessage: `吴兰当先：雷铜上阵结算（${formatPlannedActual(summonResult.requestedCount, summonResult.actualCount, '名')}）。` };
       },
       LIEREN_STACK: (card, params = {}) => {
         applyStatBuff(card, Number(params.attack || 0), Number(params.health || 0));
@@ -1447,7 +1455,7 @@
         if (state.money < REFRESH_PRICE) return setStatus(`金币不足，刷新商店需要 ${REFRESH_PRICE} 金币。`);
         spendHufu(REFRESH_PRICE);
       }
-      state.shopCards = sampleCards(CARD_LIMITS.shop);
+      state.shopCards = sampleCards(CARD_LIMITS.shop, shopCardPool);
       state.refreshCount += 1;
       renderRecruit();
       if (showStatus) setStatus(`商店已刷新（花费 ${REFRESH_PRICE} 金币），第 ${state.refreshCount} 次，共出现 6 张随机卡牌。`);
@@ -1459,7 +1467,7 @@
 
     function generateEnemyBoard() {
       const size = Math.max(1, Math.min(CARD_LIMITS.board, state.boardCards.length || 3));
-      return sampleCards(size).map((card) => instantiateCard(card)).map((card) => cloneForBattle(card));
+      return sampleCards(size, shopCardPool).map((card) => instantiateCard(card)).map((card) => cloneForBattle(card));
     }
 
     function resetForRecruit() {
@@ -1737,7 +1745,7 @@
     function renderRecruit() {
       elements.moneyCount.textContent = String(state.money);
       elements.moneyFloat.textContent = String(state.money);
-      elements.poolCount.textContent = String(cardPool.length);
+      elements.poolCount.textContent = String(shopCardPool.length);
       elements.refreshCount.textContent = String(state.refreshCount);
       elements.handCount.textContent = String(state.handCards.length);
       elements.boardCount.textContent = String(state.boardCards.length);
