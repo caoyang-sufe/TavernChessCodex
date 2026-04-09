@@ -20,6 +20,15 @@ def _static_url(relative_path: str):
     return f"{settings.STATIC_URL}{relative_path}"
 
 
+def _list_images(relative_dir: str):
+    target_dir = Path(settings.BASE_DIR) / 'assets' / relative_dir
+    return sorted(
+        f"{relative_dir}/{file_path.name}"
+        for file_path in target_dir.glob('*.png')
+        if file_path.is_file()
+    )
+
+
 def _chunk_rows(items, row_size: int = ROW_SIZE, rows_per_page: int = ROWS_PER_PAGE):
     rows = [items[index:index + row_size] for index in range(0, len(items), row_size)]
     rows = rows[:rows_per_page]
@@ -149,14 +158,39 @@ def game_view(request):
     )
     return render(request, 'game.html', {'card_paths': card_paths})
 
+def game_view(request):
+    card_dir = Path(settings.BASE_DIR) / 'assets' / 'card'
+    card_paths = sorted(
+        f"card/{file_path.name}"
+        for file_path in card_dir.glob('*.png')
+        if file_path.is_file()
+    )
+    return render(request, 'game.html', {'card_paths': card_paths})
+
 
 def handbook_view(request):
+    catalogs = {
+        'general': {
+            'title': '武将卡牌图鉴',
+            'items': _list_images('card'),
+            'page_param': 'general_page',
+        },
+        'spell': {
+            'title': '锦囊卡牌图鉴',
+            'items': _list_images('spell'),
+            'page_param': 'spell_page',
+        },
+        'weapon': {
+            'title': '装备卡牌图鉴',
+            'items': _list_images('weapon'),
+            'page_param': 'weapon_page',
+        },
+    }
     entry_terms = _read_entry_terms()
     if entry_terms:
         terms_pattern = re.compile('|'.join(re.escape(term) for term in entry_terms))
     else:
         terms_pattern = re.compile(r'^(?!)')
-
     sections = [
         _paginate(request, _build_general_items('card', terms_pattern), '武将图鉴 A（assets/card）', 'general_a_page', 'general'),
         _paginate(request, _build_general_items('piece', terms_pattern), '武将图鉴 B（assets/piece）', 'general_b_page', 'general'),
@@ -165,4 +199,20 @@ def handbook_view(request):
         _paginate(request, _build_spell_items(terms_pattern), '锦囊图鉴（assets/spell）', 'spell_page', 'spell'),
         _paginate(request, _build_weapon_items(terms_pattern), '装备图鉴（assets/weapon）', 'weapon_page', 'weapon'),
     ]
+    for key, config in catalogs.items():
+        paginator = Paginator(config['items'], CARDS_PER_PAGE)
+        page_number = request.GET.get(config['page_param'], 1)
+        page_obj = paginator.get_page(page_number)
+        rows = _chunk_rows(list(page_obj.object_list), ROW_SIZE)
+        sections.append(
+            {
+                'key': key,
+                'title': config['title'],
+                'page_param': config['page_param'],
+                'page_obj': page_obj,
+                'rows': rows,
+                'total': len(config['items']),
+            }
+        )
+
     return render(request, 'handbook.html', {'sections': sections})
