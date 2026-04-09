@@ -131,20 +131,14 @@ def game_view(request):
     )
     return render(request, 'game.html', {'card_paths': card_paths})
 
-
-def handbook_view(request):
-    sections = [
-        _paginate(request, _build_general_items('card'), '武将图鉴 A（assets/card）', 'general_a_page', 'general'),
-        _paginate(request, _build_general_items('piece'), '武将图鉴 B（assets/piece）', 'general_b_page', 'general'),
-        _paginate(request, _build_general_items('pieceHead'), '武将图鉴 C（assets/pieceHead）', 'general_c_page', 'general'),
-        _paginate(request, _build_general_items('broadcastGeneral'), '武将图鉴 D（assets/broadcastGeneral）', 'general_d_page', 'general'),
-        _paginate(request, _build_spell_items(), '锦囊图鉴（assets/spell）', 'spell_page', 'spell'),
-        _paginate(request, _build_weapon_items(), '装备图鉴（assets/weapon）', 'weapon_page', 'weapon'),
-    ]
-def game_view(request):
-    card_paths = 
     
-    ('card')
+def game_view(request):
+    card_dir = Path(settings.BASE_DIR) / 'assets' / 'card'
+    card_paths = sorted(
+        f"card/{file_path.name}"
+        for file_path in card_dir.glob('*.png')
+        if file_path.is_file()
+    )
     return render(request, 'game.html', {'card_paths': card_paths})
 
 
@@ -167,7 +161,14 @@ def handbook_view(request):
         },
     }
 
-    sections = []
+    sections = [
+        _paginate(request, _build_general_items('card'), '武将图鉴 A（assets/card）', 'general_a_page', 'general'),
+        _paginate(request, _build_general_items('piece'), '武将图鉴 B（assets/piece）', 'general_b_page', 'general'),
+        _paginate(request, _build_general_items('pieceHead'), '武将图鉴 C（assets/pieceHead）', 'general_c_page', 'general'),
+        _paginate(request, _build_general_items('broadcastGeneral'), '武将图鉴 D（assets/broadcastGeneral）', 'general_d_page', 'general'),
+        _paginate(request, _build_spell_items(), '锦囊图鉴（assets/spell）', 'spell_page', 'spell'),
+        _paginate(request, _build_weapon_items(), '装备图鉴（assets/weapon）', 'weapon_page', 'weapon'),
+    ]
     for key, config in catalogs.items():
         paginator = Paginator(config['items'], CARDS_PER_PAGE)
         page_number = request.GET.get(config['page_param'], 1)
