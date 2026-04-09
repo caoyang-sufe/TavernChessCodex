@@ -964,8 +964,10 @@
       },
       usedJinnangCountThisGame: 0,
       spentHufuThisTurn: 0,
-      globalModifiers: {
-        yellowTurban: { atkBonus: 0, hpBonus: 0 }
+      globalState: {
+        yellowTurbanBase: { attack: 1, health: 1 },
+        oneShotUniqueAuras: {},
+        battleCleanupQueue: []
       }
     };
 
@@ -1001,6 +1003,7 @@
       zuoci: [{ event: GAME_EVENTS.ON_PLAY, tag: 'TARGET_GOLDENIZE', params: { prompt: '左慈当先：请选择1名友方，将其变为金色。', cancelNotice: '左慈当先已取消，本次当先未完成，请重新发起。', onNoTarget: '左慈当先未找到可选目标（可能均已金色），效果未生效。' } }],
       huangyueying: [{ event: GAME_EVENTS.ON_PLAY, tag: 'TARGET_SCALE_BY_JINNANG', params: { baseDelta: 2, prompt: '黄月英当先：请选择1名友方。' } }],
       zhaozhong: [{ event: GAME_EVENTS.ON_PLAY, tag: 'TARGET_SCALE_BY_HUFU', params: { baseDelta: 2, prompt: '赵忠当先：请选择1名友方。', onNoTarget: '赵忠当先未找到可选目标，效果未生效。' } }],
+      yangbiao: [{ event: GAME_EVENTS.ON_PLAY, tag: 'YANGBIAO_TEMP_STRATAGEM', params: { attack: 3, health: 2 } }],
       dingfeng: [{ event: GAME_EVENTS.ON_PLAY, tag: 'TARGET_REMOVE_GAIN_MONEY', params: { gain: 3, prompt: '丁奉当先：请选择1名友方移除并获得 3 虎符。', cancelNotice: '丁奉当先已取消，本次当先未完成，请重新发起。', onNoTarget: '丁奉当先未找到可移除目标，效果未生效。' } }],
       chengyuanzhi: [{ event: GAME_EVENTS.ON_PLAY, tag: 'CHENGYUANZHI_SUMMON' }],
       wulan: [{ event: GAME_EVENTS.ON_PLAY, tag: 'SUMMON_LEITONG' }]
@@ -1035,7 +1038,10 @@
         skillTriggers: Array.isArray(card.skillTriggers) ? card.skillTriggers.map((entry) => ({ ...entry })) : (cardSkillConfig[card.baseName] || []).map((entry) => ({ ...entry, params: { ...(entry.params || {}) } })),
         isAttacking: false,
         isDamaged: false,
-        isDead: false
+        isDead: false,
+        yuceStacks: Number(card.yuceStacks || 0),
+        tempYucePending: Number(card.tempYucePending || 0),
+        tempYuceActive: Number(card.tempYuceActive || 0)
       };
     }
 
@@ -1043,12 +1049,83 @@
       return cardPool.find((card) => card.baseName === baseName && card.kind === 'general' && card.type === 'normal') || null;
     }
 
+    function resetGlobalState() {
+      const baseCard = getCardDefByBaseName('huangjinbing');
+      const baseAttack = Number(baseCard?.attack) || 1;
+      const baseHealth = Number(baseCard?.health) || 1;
+      state.globalState = {
+        yellowTurbanBase: { attack: baseAttack, health: baseHealth },
+        oneShotUniqueAuras: {},
+        battleCleanupQueue: []
+      };
+    }
+
+    function queueBattleCleanupOnce(key, handler) {
+      if (!key || typeof handler !== 'function') return;
+      const queue = Array.isArray(state.globalState?.battleCleanupQueue) ? state.globalState.battleCleanupQueue : [];
+      if (queue.some((entry) => entry.key === key)) return;
+      queue.push({ key, handler });
+      state.globalState.battleCleanupQueue = queue;
+    }
+
+    function flushBattleCleanupQueue() {
+      const queue = Array.isArray(state.globalState?.battleCleanupQueue) ? state.globalState.battleCleanupQueue : [];
+      queue.forEach((entry) => {
+        if (typeof entry.handler === 'function') entry.handler();
+      });
+      state.globalState.battleCleanupQueue = [];
+    }
+
+    function applyYellowTurbanBaseDelta(attackDelta = 0, healthDelta = 0) {
+      const base = state.globalState.yellowTurbanBase;
+      base.attack = Math.max(0, Number(base.attack || 0) + Number(attackDelta || 0));
+      base.health = Math.max(0, Number(base.health || 0) + Number(healthDelta || 0));
+      return { attack: base.attack, health: base.health };
+    }
+
+    function ensureYuceState(card) {
+      if (!card) return;
+      card.yuceStacks = Number(card.yuceStacks || 0);
+      card.tempYucePending = Number(card.tempYucePending || 0);
+      card.tempYuceActive = Number(card.tempYuceActive || 0);
+    }
+
+    function grantYuce(card, { stacks = 1, temporary = false } = {}) {
+      if (!card) return;
+      ensureYuceState(card);
+      const safeStacks = Math.max(0, Number(stacks || 0));
+      if (safeStacks <= 0) return;
+      if (temporary) card.tempYucePending += safeStacks;
+      else card.yuceStacks += safeStacks;
+    }
+
+    function activatePendingTemporaryYuce(card) {
+      ensureYuceState(card);
+      if (card.tempYucePending <= 0) return;
+      card.tempYuceActive += card.tempYucePending;
+      card.yuceStacks += card.tempYucePending;
+      card.tempYucePending = 0;
+    }
+
+    function clearTemporaryYuce(card) {
+      ensureYuceState(card);
+      if (card.tempYuceActive <= 0) return;
+      card.yuceStacks = Math.max(0, card.yuceStacks - card.tempYuceActive);
+      card.tempYuceActive = 0;
+    }
+
+    function consumeYuce(card) {
+      ensureYuceState(card);
+      if (card.yuceStacks <= 0) return false;
+      card.yuceStacks -= 1;
+      if (card.tempYuceActive > 0) card.tempYuceActive -= 1;
+      return true;
+    }
+
     function createYellowTurbanInstance(cardDef, options = {}) {
       if (!cardDef) return null;
-      const atkBonus = Number(state.globalModifiers?.yellowTurban?.atkBonus || 0);
-      const hpBonus = Number(state.globalModifiers?.yellowTurban?.hpBonus || 0);
-      const normalAttack = Math.max(0, (Number(cardDef.attack) || 0) + atkBonus);
-      const normalHealth = Math.max(0, (Number(cardDef.health) || 0) + hpBonus);
+      const normalAttack = Math.max(0, Number(state.globalState?.yellowTurbanBase?.attack || cardDef.attack || 0));
+      const normalHealth = Math.max(0, Number(state.globalState?.yellowTurbanBase?.health || cardDef.health || 0));
       const isGolden = Boolean(options.isGolden);
       const finalAttack = isGolden ? normalAttack * 2 : normalAttack;
       const finalHealth = isGolden ? normalHealth * 2 : normalHealth;
@@ -1271,6 +1348,8 @@
       if (!(source === 'board' || source === 'ally-battle')) return [];
       const keywords = [];
       if (card.hasTaunt) keywords.push('挑衅');
+      if ((card.yuceStacks || 0) > 0) keywords.push(`御策×${card.yuceStacks}`);
+      if ((card.tempYucePending || 0) > 0) keywords.push(`临时御策(待生效)×${card.tempYucePending}`);
       if (card.lierenStacks > 0) keywords.push(`烈刃×${card.lierenStacks}`);
       if (card.recruitEndBuff && ((card.recruitEndBuff.attack || 0) !== 0 || (card.recruitEndBuff.health || 0) !== 0)) keywords.push(`招募后+${card.recruitEndBuff.attack || 0}/+${card.recruitEndBuff.health || 0}`);
       if (card.isGolden) keywords.push('金色');
@@ -1390,15 +1469,28 @@
         onConfirm: (target) => { state.boardCards = state.boardCards.filter((unit) => unit.instanceId !== target.instanceId); state.money += Number(params.gain || 0); setStatus(`丁奉移除了 ${target.displayName}，获得 ${Number(params.gain || 0)} 虎符。`); },
         onNoTarget: () => setStatus(params.onNoTarget || '未找到可选目标。')
       }) ? { resolved: true } : { resolved: false },
+      YANGBIAO_TEMP_STRATAGEM: (card, params = {}) => {
+        const candidates = state.boardCards.filter((unit) => unit && unit.instanceId !== card.instanceId);
+        if (candidates.length === 0) return { statusMessage: '杨彪当先未找到可授予临时御策的目标。' };
+        const target = candidates[Math.floor(Math.random() * candidates.length)];
+        grantYuce(target, { stacks: 1, temporary: true });
+        state.boardCards.forEach((unit) => {
+          ensureYuceState(unit);
+          if (unit.yuceStacks > 0 || unit.tempYucePending > 0) applyStatBuff(unit, Number(params.attack || 0), Number(params.health || 0));
+        });
+        queueBattleCleanupOnce('clear_temp_yuce', () => {
+          state.boardCards.forEach((unit) => clearTemporaryYuce(unit));
+        });
+        return { statusMessage: `杨彪当先：${target.displayName} 获得临时御策（下一场战斗生效），并使御策友方获得 +${Number(params.attack || 0)}/+${Number(params.health || 0)}。` };
+      },
       CHENGYUANZHI_SUMMON: (card) => {
         const modifierDelta = (card.isGolden || card.type === 'gold') ? { atkBonus: 4, hpBonus: 2 } : { atkBonus: 2, hpBonus: 1 };
-        state.globalModifiers.yellowTurban.atkBonus += modifierDelta.atkBonus;
-        state.globalModifiers.yellowTurban.hpBonus += modifierDelta.hpBonus;
+        const updatedBase = applyYellowTurbanBaseDelta(modifierDelta.atkBonus, modifierDelta.hpBonus);
         const summonResult = summonToBoard([createSummonedInstance('huangjinbing', { isGolden: Boolean(card.isGolden || card.type === 'gold') })]);
         const summonStatus = summonResult.actualCount >= 1
           ? `黄巾兵上阵完成（${formatPlannedActual(summonResult.requestedCount, summonResult.actualCount, '名')}）`
           : `上阵区域已满，黄巾兵未能上阵（${formatPlannedActual(summonResult.requestedCount, summonResult.actualCount, '名')}）`;
-        return { statusMessage: `程远志当先：本局黄巾兵加成更新为 +${state.globalModifiers.yellowTurban.atkBonus}/+${state.globalModifiers.yellowTurban.hpBonus}，${summonStatus}。` };
+        return { statusMessage: `程远志当先：黄巾兵普通版基准更新为 ${updatedBase.attack}/${updatedBase.health}，${summonStatus}。` };
       },
       SUMMON_LEITONG: (card) => {
         const summonCount = (card.isGolden || card.type === 'gold') ? 2 : 1;
@@ -1462,7 +1554,9 @@
     }
 
     function cloneForBattle(card) {
-      return { ...card, currentHealth: card.currentHealth ?? card.health, isAttacking: false, isDamaged: false, isDead: false };
+      const cloned = { ...card, currentHealth: card.currentHealth ?? card.health, isAttacking: false, isDamaged: false, isDead: false };
+      ensureYuceState(cloned);
+      return cloned;
     }
 
     function generateEnemyBoard() {
@@ -1503,7 +1597,7 @@
       state.money = START_MONEY;
       state.usedJinnangCountThisGame = 0;
       state.spentHufuThisTurn = 0;
-      state.globalModifiers = { yellowTurban: { atkBonus: 0, hpBonus: 0 } };
+      resetGlobalState();
       state.phase = 'recruit';
       state.battleLog = ['战斗尚未开始。'];
       refreshShop(false);
@@ -1880,6 +1974,7 @@
       state.battleLog = [];
       state.battleFirstSide = Math.random() < 0.5 ? 'ally' : 'enemy';
       state.boardCards = state.boardCards.map((card) => cloneForBattle(card));
+      state.boardCards.forEach((card) => activatePendingTemporaryYuce(card));
       state.enemyBoardCards = generateEnemyBoard();
       appendBattleLog(`战斗开始，${state.battleFirstSide === 'ally' ? '我方' : '敌方'}先手。`);
       render();
@@ -1891,6 +1986,7 @@
       clearBattleTimer();
       const message = winner === 'ally' ? '我方获胜，返回招募阶段。' : '敌方获胜，返回招募阶段。';
       triggerEvent(GAME_EVENTS.ON_BATTLE_END, { winner, allyAlive: state.boardCards.length, enemyAlive: state.enemyBoardCards.length });
+      flushBattleCleanupQueue();
       appendBattleLog(message);
       renderBattle();
       setStatus(message);
@@ -1945,8 +2041,12 @@
               setTimeout(() => targetEl.classList.remove('hit'), 260);
             }
           });
-          target.currentHealth -= attacker.attack;
-          attacker.currentHealth -= target.attack;
+          const attackerBlocked = consumeYuce(target);
+          const targetBlocked = consumeYuce(attacker);
+          if (attackerBlocked) appendBattleLog(`${target.displayName} 消耗1层御策，抵挡了伤害。`);
+          if (targetBlocked) appendBattleLog(`${attacker.displayName} 消耗1层御策，抵挡了伤害。`);
+          target.currentHealth -= attackerBlocked ? 0 : attacker.attack;
+          attacker.currentHealth -= targetBlocked ? 0 : target.attack;
           triggerEvent(GAME_EVENTS.ON_DAMAGE_DEALT, { sourceCard: attacker, sourceSide: attackerSide, targetCard: target, targetSide: defenderSide, amount: attacker.attack });
           triggerEvent(GAME_EVENTS.ON_DAMAGE_TAKEN, { sourceCard: target, sourceSide: defenderSide, targetCard: attacker, targetSide: attackerSide, amount: attacker.attack });
           triggerEvent(GAME_EVENTS.ON_DAMAGE_DEALT, { sourceCard: target, sourceSide: defenderSide, targetCard: attacker, targetSide: attackerSide, amount: target.attack });
