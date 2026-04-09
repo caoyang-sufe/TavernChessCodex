@@ -1019,6 +1019,19 @@
       return `${actorName}当先：部分获得（手牌已满，实际获得 ${added} 张）。`;
     }
 
+    function pickLeftmostByFaction(units) {
+      const queue = Array.isArray(units) ? units : [];
+      const firstByFaction = new Map();
+      queue.forEach((unit) => {
+        const force = unit?.force;
+        if (!force || firstByFaction.has(force)) return;
+        firstByFaction.set(force, unit);
+      });
+      return LEIBO_FORCE_POOL
+        .map((force) => firstByFaction.get(force))
+        .filter((unit) => Boolean(unit));
+    }
+
     function getLeiboGainCandidate() {
       const forcesOnBoard = new Set(
         state.boardCards
@@ -1229,6 +1242,12 @@
           return true;
         }
         setStatus(`雷薄当先：部分获得（手牌已满，实际获得 ${gainResult.added} 张）。`);
+        return true;
+      }
+      if (card.baseName === 'yuejiu') {
+        const targets = pickLeftmostByFaction(state.boardCards);
+        targets.forEach((target) => applyStatBuff(target, 3, 3));
+        setStatus(`乐就当先：按棋盘顺序为每种势力首个单位施加 +3/+3，实际命中 ${targets.length} 个单位。`);
         return true;
       }
       if (card.baseName === 'yanfuren') {
