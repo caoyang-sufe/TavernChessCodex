@@ -1036,6 +1036,21 @@
         });
         return false;
       }
+      if (card.baseName === 'taoqian') {
+        startTargeting({
+          sourceCard: card,
+          prompt: '陶谦当先：请选择另一名我方单位，使其获得 +1/+3（右键或点“取消选目标”可取消）。',
+          cancelNotice: '陶谦当先已取消，本次当先未完成，请重新发起。',
+          filter: (target, source) => target.instanceId !== source.instanceId,
+          confirm: (target) => {
+            target.attack += 1;
+            target.health += 3;
+            target.currentHealth += 3;
+            setStatus(`陶谦援助了 ${target.displayName}，其获得 +1/+3。`);
+          }
+        });
+        return false;
+      }
       setStatus(`${card.displayName} 已上阵。`);
       return true;
     }
