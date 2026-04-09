@@ -8,7 +8,6 @@
   <style>
     body { font-family: "Microsoft YaHei", sans-serif; margin: 0; background: #f6f2eb; color: #2e1c0f; }
     .wrap { max-width: 1700px; margin: 0 auto; padding: 24px; }
-    .wrap { max-width: 1600px; margin: 0 auto; padding: 24px; }
     h1 { margin: 0 0 16px; }
     .nav { margin-bottom: 20px; }
     .nav a { color: #7b431c; text-decoration: none; font-weight: 700; }
@@ -42,8 +41,6 @@
     .weapon-meta .line { margin-bottom: 4px; }
     .weapon-meta .line:last-child { margin-bottom: 0; }
 
-    .cell { background: #fbf7f1; border: 1px dashed #d9c7b2; border-radius: 8px; aspect-ratio: 1 / 1.36; overflow: hidden; }
-    .cell img { width: 100%; height: 100%; object-fit: contain; display: block; background: #fff; }
     .pager { margin-top: 12px; display: flex; gap: 12px; align-items: center; }
     .pager a { color: #7b431c; text-decoration: none; font-weight: 700; }
     .disabled { color: #b7a08b; }
@@ -92,14 +89,6 @@
                         </div>
                       </article>
                     {% endif %}
-        <div class="meta">共 {{ section.total }} 张｜每页 10 行 × 6 列（60 张）</div>
-        <div class="grid">
-          {% for row in section.rows %}
-            <div class="row">
-              {% for image in row %}
-                <div class="cell">
-                  {% if image %}
-                    <img src="{% static image %}" alt="{{ image }}">
                   {% endif %}
                 </div>
               {% endfor %}
