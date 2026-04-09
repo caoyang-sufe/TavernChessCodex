@@ -14,6 +14,25 @@ CARDS_PER_PAGE = ROW_SIZE * ROWS_PER_PAGE
 TYPE_MAP = {'1': 'gold', '2': 'normal'}
 TYPE_NAME_MAP = {'1': '金色版本', '2': '普通版本'}
 CHINESE_NUMERAL = {1: '一', 2: '二', 3: '三', 4: '四', 5: '五', 6: '六'}
+SKILL_TAG_ALIASES = {
+    '必中': ('无视闪避', '不可闪避', '不能闪避'),
+    '闪避': ('躲避',),
+    '护甲': ('护盾',),
+    '无法攻击': ('不可攻击', '不能攻击'),
+}
+CONSTRAINT_PATTERNS = (
+    ('唯一效果', re.compile(r'唯一效果')),
+    ('无法攻击', re.compile(r'无法攻击|不可攻击|不能攻击')),
+    ('每回合限一次', re.compile(r'每回合限一次')),
+    ('限一次', re.compile(r'限一次')),
+)
+EFFECT_PATTERNS = (
+    ('buff', re.compile(r'增益|提升|增加|获得|强化')),
+    ('summon', re.compile(r'召唤|登场|上场')),
+    ('draw', re.compile(r'摸.?牌|抽.?牌')),
+    ('armor', re.compile(r'护甲|护盾')),
+    ('damage', re.compile(r'造成.+伤害')),
+)
 
 
 def _static_url(relative_path: str):
@@ -49,6 +68,47 @@ def _read_entry_terms():
     return sorted(set(terms), key=len, reverse=True)
 
 
+def normalize_skill_text(text: str):
+    normalized = (text or '').strip()
+    if not normalized:
+        return ''
+    for canonical, aliases in SKILL_TAG_ALIASES.items():
+        for alias in aliases:
+            normalized = normalized.replace(alias, canonical)
+    return normalized
+
+
+def extract_skill_tags(text: str, entry_terms=None):
+    normalized_text = normalize_skill_text(text)
+    tags = {
+        'keywords': [],
+        'effects': [],
+        'values': [],
+        'constraints': [],
+    }
+    if not normalized_text:
+        return tags
+
+    terms = entry_terms if entry_terms is not None else _read_entry_terms()
+    for term in terms:
+        if term and term in normalized_text:
+            tags['keywords'].append(term)
+
+    for effect, pattern in EFFECT_PATTERNS:
+        if pattern.search(normalized_text):
+            tags['effects'].append(effect)
+
+    for constraint, pattern in CONSTRAINT_PATTERNS:
+        if pattern.search(normalized_text):
+            tags['constraints'].append(constraint)
+
+    tags['values'] = re.findall(r'[+-]?\d+%?', normalized_text)
+    tags['keywords'] = sorted(set(tags['keywords']))
+    tags['effects'] = sorted(set(tags['effects']))
+    tags['constraints'] = sorted(set(tags['constraints']))
+    return tags
+
+
 def _highlight_skill_text(text: str, terms_pattern: re.Pattern):
     escaped = escape(text or '')
     if not escaped:
@@ -77,6 +137,7 @@ def _paginate(request, items, title: str, page_param: str, kind: str):
 def _build_general_items(asset_subdir: str, terms_pattern: re.Pattern):
     assets_dir = Path(settings.BASE_DIR) / 'assets' / asset_subdir
     records = _read_tsv('configs/card.csv') + _read_tsv('configs/card_ex.csv')
+    entry_terms = _read_entry_terms()
     items = []
     for row in records:
         card_id = row['ID']
@@ -86,6 +147,7 @@ def _build_general_items(asset_subdir: str, terms_pattern: re.Pattern):
         card_type = row.get('类型', '').strip()
         level = int(row.get('等级', '1') or 1)
         skill_text = row.get('技能描述', '')
+        normalized_skill = normalize_skill_text(skill_text)
         items.append(
             {
                 'image': f'{asset_subdir}/{card_id}.png',
@@ -95,6 +157,8 @@ def _build_general_items(asset_subdir: str, terms_pattern: re.Pattern):
                 'attack': row.get('攻击', ''),
                 'health': row.get('血量', ''),
                 'skill': skill_text,
+                'normalized_skill': normalized_skill,
+                'skill_tags': extract_skill_tags(normalized_skill, entry_terms),
                 'skill_html': _highlight_skill_text(skill_text, terms_pattern),
                 'level': level,
                 'stars': '★' * max(1, min(6, level)),
@@ -154,6 +218,7 @@ def game_view(request):
     spell_assets_dir = Path(settings.BASE_DIR) / 'assets' / 'spell'
 
     general_records = _read_tsv('configs/card.csv') + _read_tsv('configs/card_ex.csv')
+    entry_terms = _read_entry_terms()
     general_defs = []
     for row in general_records:
         if row.get('类型', '').strip() != '2':
@@ -165,6 +230,8 @@ def game_view(request):
         if not image_file.exists():
             continue
         level = int(row.get('等级', '1') or 1)
+        skill_text = row.get('技能描述', '')
+        normalized_skill = normalize_skill_text(skill_text)
         general_defs.append(
             {
                 'id': card_id,
@@ -174,7 +241,9 @@ def game_view(request):
                 'force': row.get('势力', ''),
                 'attack': int(row.get('攻击', '0') or 0),
                 'health': int(row.get('血量', '0') or 0),
-                'skill': row.get('技能描述', ''),
+                'skill': skill_text,
+                'normalized_skill': normalized_skill,
+                'skill_tags': extract_skill_tags(normalized_skill, entry_terms),
                 'level': level,
                 'stars': '★' * max(1, min(6, level)),
                 'type': 'normal',
