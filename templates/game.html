@@ -931,7 +931,9 @@
       phase: 'recruit', shopCards: [], handCards: [], boardCards: [], enemyBoardCards: [], refreshCount: 0, nextId: 1,
       dragPayload: null, money: START_MONEY, timerRemaining: TURN_DURATION, timerId: null, battleTimerId: null,
       battleLog: ['战斗尚未开始。'], battleTurn: 0, battleFirstSide: 'ally',
-      targeting: { active: false, sourceCard: null, filter: null, confirm: null, prompt: '', cancelNotice: '' }
+      targeting: { active: false, sourceCard: null, filter: null, confirm: null, prompt: '', cancelNotice: '' },
+      usedJinnangCountThisGame: 0,
+      spentHufuThisTurn: 0
     };
 
     const elements = {
@@ -962,6 +964,19 @@
     }
 
     function setStatus(message) { elements.statusText.textContent = message; }
+
+    function spendHufu(amount) {
+      const safeAmount = Math.max(0, amount);
+      if (safeAmount <= 0) return;
+      state.money -= safeAmount;
+      state.spentHufuThisTurn += safeAmount;
+    }
+
+    function recordJinnangUse(count = 1) {
+      const safeCount = Math.max(0, count);
+      if (safeCount <= 0) return;
+      state.usedJinnangCountThisGame += safeCount;
+    }
 
     function hasActiveTargeting() {
       return state.targeting.active === true;
@@ -1102,6 +1117,7 @@
       clearBattleTimer();
       clearRecruitTimer();
       clearTargeting();
+      state.spentHufuThisTurn = 0;
       state.enemyBoardCards = [];
       state.battleTurn = 0;
       state.battleLog = ['战斗尚未开始。'];
@@ -1120,6 +1136,8 @@
       state.refreshCount = 0;
       state.nextId = 1;
       state.money = START_MONEY;
+      state.usedJinnangCountThisGame = 0;
+      state.spentHufuThisTurn = 0;
       state.phase = 'recruit';
       state.battleLog = ['战斗尚未开始。'];
       refreshShop(false);
@@ -1186,7 +1204,7 @@
       if (state.money < BUY_PRICE) return setStatus('金币不足，购买一张卡需要 3 金币。');
       const card = state.shopCards[shopIndex];
       if (!card) return;
-      state.money -= BUY_PRICE;
+      spendHufu(BUY_PRICE);
       state.shopCards[shopIndex] = null;
       state.handCards.push(instantiateCard(card));
       renderRecruit();
