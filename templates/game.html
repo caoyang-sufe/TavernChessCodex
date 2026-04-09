@@ -1413,6 +1413,16 @@
         );
         return true;
       }
+      if (card.baseName === 'wulan') {
+        const summonCount = (card.isGolden || card.type === 'gold') ? 2 : 1;
+        const summonResult = summonToBoard('leitong', summonCount);
+        if (summonResult.actualCount === summonCount) {
+          setStatus(`吴兰当先：上阵 ${summonResult.actualCount} 个雷铜。`);
+          return true;
+        }
+        setStatus(`吴兰当先：尝试上阵 ${summonCount} 个雷铜，受空位限制实际上阵 ${summonResult.actualCount} 个。`);
+        return true;
+      }
       setStatus(`${card.displayName} 已上阵。`);
       return true;
     }
