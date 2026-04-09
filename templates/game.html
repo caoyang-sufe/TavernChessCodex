@@ -955,6 +955,22 @@
       return { ...card, instanceId: state.nextId++, currentHealth: card.health, hasTaunt: Boolean(card.hasTaunt), isAttacking: false, isDamaged: false, isDead: false };
     }
 
+    function addCardsToHand(cardDefs) {
+      const cards = Array.isArray(cardDefs) ? cardDefs : [];
+      const requested = cards.length;
+      const available = Math.max(0, CARD_LIMITS.hand - state.handCards.length);
+      const acceptedDefs = cards.slice(0, available);
+      const addedCards = acceptedDefs.map((card) => instantiateCard(card));
+      state.handCards.push(...addedCards);
+      return { requested, added: addedCards.length };
+    }
+
+    function buildGainCardsStatus(actorName, requested, added) {
+      if (requested <= 0) return `${actorName}当先未找到可获得的牌。`;
+      if (added === requested) return `${actorName}当先：全部获得，共获得 ${added} 张牌。`;
+      return `${actorName}当先：部分获得（手牌已满，实际获得 ${added} 张）。`;
+    }
+
     function clearRecruitTimer() {
       if (state.timerId) { clearInterval(state.timerId); state.timerId = null; }
     }
@@ -1117,6 +1133,26 @@
           },
           onNoTarget: () => setStatus('陈珪当先未找到可选目标，效果未生效。')
         });
+      }
+      if (card.baseName === 'liaohua') {
+        const gainDefs = sampleCards(1);
+        const gainResult = addCardsToHand(gainDefs);
+        setStatus(buildGainCardsStatus('廖化', gainResult.requested, gainResult.added));
+        return true;
+      }
+      if (card.baseName === 'chenwu') {
+        const dongxiPool = cardPool.filter((unit) => unit.baseName === 'dongxi');
+        const gainDefs = sampleCards(1, dongxiPool);
+        const gainResult = addCardsToHand(gainDefs);
+        setStatus(buildGainCardsStatus('陈武', gainResult.requested, gainResult.added));
+        return true;
+      }
+      if (card.baseName === 'huangchengyan') {
+        const jinnangPool = cardPool.filter((unit) => ['huochuan'].includes(unit.baseName));
+        const gainDefs = sampleCards(1, jinnangPool.length > 0 ? jinnangPool : cardPool);
+        const gainResult = addCardsToHand(gainDefs);
+        setStatus(buildGainCardsStatus('黄承彦', gainResult.requested, gainResult.added));
+        return true;
       }
       if (card.baseName === 'yanfuren') {
         return startOnPlayTargeting(card, {
