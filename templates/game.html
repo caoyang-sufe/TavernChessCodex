@@ -525,6 +525,11 @@
       word-break: break-all;
     }
 
+    .skill-term {
+      color: #c11717;
+      font-weight: 800;
+    }
+
     .card-actions {
       display: flex;
       gap: 8px;
@@ -898,7 +903,9 @@
 
   <div class="money-float">金币 <strong id="money-float">0</strong></div>
 
-  {{ card_paths|json_script:"card-paths" }}
+  {{ card_defs|json_script:"card-defs" }}
+  {{ spell_defs|json_script:"spell-defs" }}
+  {{ skill_terms|json_script:"skill-terms" }}
 
   <script>
     const CARD_LIMITS = { shop: 6, board: 7, hand: 10 };
@@ -908,7 +915,9 @@
     const TURN_DURATION = 120;
     const BATTLE_STEP_MS = 950;
 
-    const cardPaths = JSON.parse(document.getElementById('card-paths').textContent);
+    const cardDefs = JSON.parse(document.getElementById('card-defs').textContent);
+    const spellDefs = JSON.parse(document.getElementById('spell-defs').textContent);
+    const skillTerms = JSON.parse(document.getElementById('skill-terms').textContent);
     const STATIC_BASE = "{% static '' %}";
 
     function seededStat(seed, salt) {
@@ -918,13 +927,20 @@
       return hash % 9 + 1;
     }
 
-    const cardPool = cardPaths.map((path) => {
-      const fileName = path.split('/').pop();
+    const cardPool = cardDefs.map((card) => {
+      const fileName = card.path.split('/').pop();
       const stem = fileName.replace(/\.[^.]+$/, '');
       const match = stem.match(/^(.*?)(?:_(\d+))?$/);
       const baseName = match ? match[1] : stem;
       const variant = match && match[2] ? match[2] : '';
-      return { path, fileName, stem, baseName, variant, displayName: baseName.replace(/_/g, ' '), attack: seededStat(stem, 'atk'), health: seededStat(stem, 'hp') };
+      return {
+        ...card,
+        fileName,
+        stem,
+        baseName,
+        variant,
+        displayName: card.name || baseName.replace(/_/g, ' ')
+      };
     });
 
     const state = {
@@ -952,7 +968,54 @@
     }
 
     function instantiateCard(card) {
-      return { ...card, instanceId: state.nextId++, currentHealth: card.health, hasTaunt: Boolean(card.hasTaunt), isAttacking: false, isDamaged: false, isDead: false };
+      const safeAttack = Number.isFinite(card.attack) ? card.attack : 0;
+      const safeHealth = Number.isFinite(card.health) ? card.health : 0;
+      return {
+        ...card,
+        displayName: card.displayName || card.name || card.baseName || '未知卡牌',
+        attack: safeAttack,
+        health: safeHealth,
+        instanceId: state.nextId++,
+        currentHealth: safeHealth,
+        hasTaunt: Boolean(card.hasTaunt),
+        isAttacking: false,
+        isDamaged: false,
+        isDead: false
+      };
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? '')
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
+    }
+
+    function highlightSkillText(text) {
+      const escaped = escapeHtml(text || '');
+      if (!escaped || !Array.isArray(skillTerms) || skillTerms.length === 0) return escaped;
+      const orderedTerms = [...skillTerms].sort((a, b) => b.length - a.length);
+      const escapedTerms = orderedTerms.map((term) => term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+      const pattern = new RegExp(escapedTerms.join('|'), 'g');
+      return escaped.replace(pattern, (matched) => `<span class="skill-term">${matched}</span>`);
+    }
+
+    function addCardsToHand(cardDefs) {
+      const cards = Array.isArray(cardDefs) ? cardDefs : [];
+      const requested = cards.length;
+      const available = Math.max(0, CARD_LIMITS.hand - state.handCards.length);
+      const acceptedDefs = cards.slice(0, available);
+      const addedCards = acceptedDefs.map((card) => instantiateCard(card));
+      state.handCards.push(...addedCards);
+      return { requested, added: addedCards.length };
+    }
+
+    function buildGainCardsStatus(actorName, requested, added) {
+      if (requested <= 0) return `${actorName}当先未找到可获得的牌。`;
+      if (added === requested) return `${actorName}当先：全部获得，共获得 ${added} 张牌。`;
+      return `${actorName}当先：部分获得（手牌已满，实际获得 ${added} 张）。`;
     }
 
     function clearRecruitTimer() {
@@ -1117,6 +1180,26 @@
           },
           onNoTarget: () => setStatus('陈珪当先未找到可选目标，效果未生效。')
         });
+      }
+      if (card.baseName === 'liaohua') {
+        const shuPool = cardPool.filter((unit) => unit.kind === 'general' && unit.force === '蜀' && unit.type === 'normal');
+        const gainDefs = sampleCards(1, shuPool);
+        const gainResult = addCardsToHand(gainDefs);
+        setStatus(buildGainCardsStatus('廖化', gainResult.requested, gainResult.added));
+        return true;
+      }
+      if (card.baseName === 'chenwu') {
+        const dongxiPool = cardPool.filter((unit) => unit.baseName === 'dongxi');
+        const gainDefs = sampleCards(1, dongxiPool);
+        const gainResult = addCardsToHand(gainDefs);
+        setStatus(buildGainCardsStatus('陈武', gainResult.requested, gainResult.added));
+        return true;
+      }
+      if (card.baseName === 'huangchengyan') {
+        const gainDefs = sampleCards(1, spellDefs);
+        const gainResult = addCardsToHand(gainDefs);
+        setStatus(buildGainCardsStatus('黄承彦', gainResult.requested, gainResult.added));
+        return true;
       }
       if (card.baseName === 'yanfuren') {
         return startOnPlayTargeting(card, {
@@ -1358,6 +1441,10 @@
       const index = state.handCards.findIndex((card) => card.instanceId === instanceId);
       if (index === -1) return;
       const [card] = state.handCards.splice(index, 1);
+      if (card.kind === 'spell') {
+        state.handCards.splice(index, 0, card);
+        return setStatus(`锦囊牌 ${card.displayName} 不能上阵到战场。`);
+      }
       state.boardCards.push(card);
       triggerOnPlay(card);
       renderRecruit();
@@ -1421,13 +1508,24 @@
       if (card.isAttacking) article.classList.add('attacking');
       if (card.isDamaged) article.classList.add('damaged');
       if (card.isDead) article.classList.add('dead');
-      const variantText = card.variant ? `变体 ${card.variant}` : '基础版';
+      const variantText = card.kind === 'spell' ? '锦囊牌' : card.variant ? `变体 ${card.variant}` : '基础版';
       const keywordList = getCardKeywords(card, source);
       const keywordText = keywordList.length > 0 ? `<p class="card-keyword">${keywordList.join(' · ')}</p>` : '';
+      const skillHtml = highlightSkillText(card.skill || '');
+      const generalMeta = `
+        <p class="card-meta">星级：${escapeHtml(card.stars || '★')}</p>
+        <p class="card-meta">名称：${escapeHtml(card.displayName)}</p>
+        <p class="card-meta">技能：${skillHtml || '—'}</p>
+        <p class="card-meta">势力：${escapeHtml(card.force || '未知')}</p>
+      `;
+      const spellMeta = `
+        <p class="card-meta">名称：${escapeHtml(card.title || card.displayName)}</p>
+        <p class="card-meta">技能：${skillHtml || '—'}</p>
+      `;
       let actionButton = '';
       if (state.phase === 'recruit') {
         if (source === 'shop') actionButton = '<button class="mini-btn success" type="button">购买 -3</button>';
-        else if (source === 'hand') actionButton = '<button class="mini-btn" type="button">上阵</button>';
+        else if (source === 'hand') actionButton = `<button class="mini-btn" type="button">${card.kind === 'spell' ? '不可上阵' : '上阵'}</button>`;
         else if (source === 'board') actionButton = '<button class="mini-btn danger" type="button">卖出 +1</button>';
       }
       article.innerHTML = `
@@ -1437,15 +1535,17 @@
             <span class="tag">${source === 'shop' ? '商店' : source === 'hand' ? '手牌' : source === 'board' ? '上阵' : source === 'enemy-battle' ? '敌方' : '我方'}</span>
             <span class="tag">${variantText}</span>
           </div>
-          <span class="damage-float" data-role="damage"></span>
-          <div class="stats-bar">
-            <span class="stat-orb attack">${card.attack}</span>
-            <span class="stat-orb health" data-role="health">${Math.max(0, card.currentHealth ?? card.health)}</span>
-          </div>
+          ${card.kind === 'general' ? `
+            <span class="damage-float" data-role="damage"></span>
+            <div class="stats-bar">
+              <span class="stat-orb attack">${card.attack}</span>
+              <span class="stat-orb health" data-role="health">${Math.max(0, card.currentHealth ?? card.health)}</span>
+            </div>
+          ` : ''}
         </div>
         <div class="card-body">
           <h3 class="card-name">${card.displayName}</h3>
-          <p class="card-meta">${card.fileName}</p>
+          ${card.kind === 'spell' ? spellMeta : generalMeta}
           ${keywordText}
         </div>
         ${actionButton ? `<div class="card-actions">${actionButton}</div>` : ''}
@@ -1455,7 +1555,8 @@
         button.addEventListener('click', () => {
           if (hasActiveTargeting() && source !== 'board') return setStatus('请先完成或取消当前选目标。');
           if (source === 'shop') addShopCardToHand(index);
-          else if (source === 'hand') moveHandCardToBoard(card.instanceId);
+          else if (source === 'hand' && card.kind !== 'spell') moveHandCardToBoard(card.instanceId);
+          else if (source === 'hand' && card.kind === 'spell') setStatus(`锦囊牌 ${card.displayName} 不能上阵到战场。`);
           else if (source === 'board') sellCard({ source: 'board', instanceId: card.instanceId });
         });
       }
