@@ -889,6 +889,24 @@
       const variant = match && match[2] ? match[2] : '';
       return { path, fileName, stem, baseName, variant, displayName: baseName.replace(/_/g, ' '), attack: seededStat(stem, 'atk'), health: seededStat(stem, 'hp') };
     });
+    const specialCardEntries = {
+      liushan: { entries: ['无法攻击'] },
+      zhangfei: { entries: ['咆哮'] },
+      jiping: { entries: ['鸩毒'] },
+      diaochan: { entries: ['闪避'] },
+      zhaoyun: { entries: ['闪避'] },
+      dianwei: { entries: ['挑衅'] },
+      panfeng: { entries: ['挑衅'] },
+      fengfang: { entries: ['御策'] },
+      wangyun: { entries: ['御策', '破军'] },
+      luzhi: { entries: ['破军'] },
+      huochuan: { entries: ['遗计'] },
+      duanwei: { armor: 2 },
+      guosi: { armor: 2 },
+      bairao: { entries: ['烈刃'] },
+      huangfusong: { entries: ['御策'] },
+      hucheer: { entries: ['连锁'] },
+    };
 
     const state = {
       phase: 'recruit', shopCards: [], handCards: [], boardCards: [], enemyBoardCards: [], refreshCount: 0, nextId: 1,
@@ -910,7 +928,20 @@
     }
 
     function instantiateCard(card) {
-      return { ...card, instanceId: state.nextId++, currentHealth: card.health, isAttacking: false, isDamaged: false, isDead: false };
+      const attrs = specialCardEntries[card.baseName] ?? {};
+      return {
+        ...card,
+        instanceId: state.nextId++,
+        currentHealth: card.health,
+        isAttacking: false,
+        isDamaged: false,
+        isDead: false,
+        isControlled: false,
+        entries: [...(attrs.entries ?? [])],
+        armor: attrs.armor ?? 0,
+        yuceCharges: (attrs.entries ?? []).includes('御策') ? 1 : 0,
+        dodgeCharges: (attrs.entries ?? []).includes('闪避') ? 1 : 0,
+      };
     }
 
     function clearRecruitTimer() {
@@ -948,7 +979,18 @@
     }
 
     function cloneForBattle(card) {
-      return { ...card, currentHealth: card.currentHealth ?? card.health, isAttacking: false, isDamaged: false, isDead: false };
+      return {
+        ...card,
+        currentHealth: card.currentHealth ?? card.health,
+        isAttacking: false,
+        isDamaged: false,
+        isDead: false,
+        isControlled: card.isControlled ?? false,
+        entries: [...(card.entries ?? [])],
+        armor: card.armor ?? 0,
+        yuceCharges: card.yuceCharges ?? 0,
+        dodgeCharges: card.dodgeCharges ?? 0,
+      };
     }
 
     function generateEnemyBoard() {
@@ -1133,7 +1175,7 @@
         </div>
         <div class="card-body">
           <h3 class="card-name">${card.displayName}</h3>
-          <p class="card-meta">${card.fileName}</p>
+          <p class="card-meta">${card.fileName}${card.entries?.length ? ` · ${card.entries.join(' / ')}` : ''}</p>
         </div>
         ${actionButton ? `<div class="card-actions">${actionButton}</div>` : ''}
       `;
@@ -1235,7 +1277,117 @@
     function chooseRandomTarget(side) {
       const cards = side === 'ally' ? state.boardCards : state.enemyBoardCards;
       if (cards.length === 0) return null;
-      return cards[Math.floor(Math.random() * cards.length)];
+      const aliveCards = cards.filter((card) => card.currentHealth > 0 && !card.isDead);
+      if (aliveCards.length === 0) return null;
+      const tauntCards = aliveCards.filter((card) => (card.entries ?? []).includes('挑衅'));
+      const pool = tauntCards.length > 0 ? tauntCards : aliveCards;
+      return pool[Math.floor(Math.random() * pool.length)];
+    }
+
+    function hasEntry(card, entry) { return (card.entries ?? []).includes(entry); }
+
+    function isUnitActionable(card) {
+      return !!card && card.currentHealth > 0 && !card.isDead && !card.isControlled;
+    }
+
+    function canUnitAttack(attacker, sideCards) {
+      if (!isUnitActionable(attacker)) return false;
+      if (!hasEntry(attacker, '无法攻击')) return true;
+      const actionable = sideCards.filter((card) => isUnitActionable(card));
+      const hasFreeAttacker = actionable.some((card) => !hasEntry(card, '无法攻击'));
+      return !hasFreeAttacker;
+    }
+
+    function computeAttackCount(attacker) {
+      const roarBonus = hasEntry(attacker, '咆哮') ? 1 : 0;
+      return 1 + roarBonus;
+    }
+
+    function applyDamageWithModifiers(defender, rawDamage) {
+      let damage = Math.max(0, rawDamage);
+      if (damage <= 0) return { actualDamage: 0, blockedByArmor: 0, blockedByYuce: false };
+      if ((defender.yuceCharges ?? 0) > 0) {
+        defender.yuceCharges -= 1;
+        return { actualDamage: 0, blockedByArmor: 0, blockedByYuce: true };
+      }
+      let blockedByArmor = 0;
+      if ((defender.armor ?? 0) > 0) {
+        blockedByArmor = Math.min(defender.armor, damage);
+        defender.armor -= blockedByArmor;
+        damage -= blockedByArmor;
+      }
+      defender.currentHealth -= damage;
+      return { actualDamage: damage, blockedByArmor, blockedByYuce: false };
+    }
+
+    function triggerPostHitEvents({
+      attacker, defender, defenderSideCards, attackerSideCards, defenderSide, attackerSide, dealtDamage, logs,
+    }) {
+      if (dealtDamage > 0 && hasEntry(attacker, '鸩毒')) {
+        defender.currentHealth = 0;
+        defender.isDead = true;
+        logs.push(`${attacker.displayName} 的鸩毒生效，${defender.displayName} 直接阵亡。`);
+      }
+      if (dealtDamage > 0 && hasEntry(defender, '连锁')) {
+        const linked = defenderSideCards.filter((card) => card !== defender && hasEntry(card, '连锁') && card.currentHealth > 0 && !card.isDead);
+        linked.forEach((card) => {
+          card.currentHealth -= dealtDamage;
+          logs.push(`${defender.displayName} 连锁扩散，${card.displayName} 受到 ${dealtDamage} 点伤害。`);
+          if (card.currentHealth <= 0) card.isDead = true;
+        });
+      }
+      if (defender.currentHealth <= 0 || defender.isDead) {
+        defender.isDead = true;
+        if (hasEntry(attacker, '破军')) {
+          attacker.attack += 1;
+          logs.push(`${attacker.displayName} 触发破军，攻击力+1。`);
+        }
+        if (hasEntry(defender, '遗计')) {
+          const candidates = attackerSideCards.filter((card) => card.currentHealth > 0 && !card.isDead);
+          const randomTarget = candidates[Math.floor(Math.random() * candidates.length)];
+          if (randomTarget) {
+            randomTarget.currentHealth -= 1;
+            logs.push(`${defender.displayName} 触发遗计，对 ${randomTarget.displayName} 造成 1 点伤害。`);
+            if (randomTarget.currentHealth <= 0) randomTarget.isDead = true;
+          }
+        }
+      }
+    }
+
+    function performSingleAttack(attacker, target, context) {
+      const {
+        attackerSide, defenderSide, attackerEl, targetEl, attackerSideCards, defenderSideCards,
+      } = context;
+      const logs = [];
+      const canDodge = (target.dodgeCharges ?? 0) > 0 && !hasEntry(attacker, '必中');
+      if (canDodge) {
+        target.dodgeCharges -= 1;
+        logs.push(`${target.displayName} 闪避了此次攻击。`);
+        return { logs, attackerDamageTaken: 0, targetDamageTaken: 0 };
+      }
+      let attackDamage = attacker.attack;
+      if (hasEntry(attacker, '烈刃')) attackDamage += 1;
+      const resultOnTarget = applyDamageWithModifiers(target, attackDamage);
+      const counterDamage = Math.max(0, target.attack);
+      attacker.currentHealth -= counterDamage;
+
+      let battleLog = `${attackerSide === 'ally' ? '我方' : '敌方'} ${attacker.displayName}(${attacker.attack}/${Math.max(0, attacker.currentHealth)}) 攻击 ${defenderSide === 'ally' ? '我方' : '敌方'} ${target.displayName}`;
+      if (hasEntry(target, '御策') && resultOnTarget.blockedByYuce) battleLog += '（被御策抵挡）';
+      if (resultOnTarget.blockedByArmor > 0) battleLog += `（护甲抵挡${resultOnTarget.blockedByArmor}）`;
+      battleLog += '。';
+      logs.push(battleLog);
+
+      triggerPostHitEvents({
+        attacker,
+        defender: target,
+        defenderSideCards,
+        attackerSideCards,
+        defenderSide,
+        attackerSide,
+        dealtDamage: resultOnTarget.actualDamage,
+        logs,
+      });
+      return { logs, attackerDamageTaken: counterDamage, targetDamageTaken: resultOnTarget.actualDamage };
     }
 
     function getCardElement(side, instanceId) {
@@ -1340,57 +1492,66 @@
       const attackerData = getNextAttacker(attackerSide, Math.floor(state.battleTurn / 2));
       if (!attackerData) return finishBattle(defenderSide);
       const attacker = attackerData.card;
-      const target = chooseRandomTarget(defenderSide);
-      if (!target) return finishBattle(attackerSide);
+      const attackerSideCards = attackerSide === 'ally' ? state.boardCards : state.enemyBoardCards;
+      const defenderSideCards = defenderSide === 'ally' ? state.boardCards : state.enemyBoardCards;
+      if (!canUnitAttack(attacker, attackerSideCards)) {
+        appendBattleLog(`${attacker.displayName} 处于无法攻击状态，跳过出手。`);
+        state.battleTurn += 1;
+        return scheduleBattleStep();
+      }
 
       attacker.isAttacking = true;
       attacker.isDamaged = true;
-      target.isDamaged = true;
-
       const attackerEl = getCardElement(attackerSide, attacker.instanceId);
-      const targetEl = getCardElement(defenderSide, target.instanceId);
 
       if (attackerEl) {
         attackerEl.classList.add('attacking');
         attackerEl.classList.add('damaged');
         attackerEl.classList.add('impact');
       }
-      if (targetEl) {
-        targetEl.classList.add('damaged');
-        targetEl.classList.add('impact');
-      }
-
-      await animateAttack(attackerEl, targetEl, () => {
+      const attackCount = computeAttackCount(attacker);
+      for (let i = 0; i < attackCount; i++) {
+        if (!canUnitAttack(attacker, attackerSideCards)) break;
+        if (attacker.currentHealth <= 0 || attacker.isDead) break;
+        const target = chooseRandomTarget(defenderSide);
+        if (!target) return finishBattle(attackerSide);
+        target.isDamaged = true;
+        const targetEl = getCardElement(defenderSide, target.instanceId);
         if (targetEl) {
-          targetEl.classList.add('hit');
-          setTimeout(() => targetEl.classList.remove('hit'), 260);
+          targetEl.classList.add('damaged');
+          targetEl.classList.add('impact');
         }
-      });
-
-      target.currentHealth -= attacker.attack;
-      attacker.currentHealth -= target.attack;
-      updateHealthUi(attackerEl, attacker.currentHealth);
-      updateHealthUi(targetEl, target.currentHealth);
-      showDamage(attackerEl, target.attack);
-      showDamage(targetEl, attacker.attack);
+        await animateAttack(attackerEl, targetEl, () => {
+          if (targetEl) {
+            targetEl.classList.add('hit');
+            setTimeout(() => targetEl.classList.remove('hit'), 260);
+          }
+        });
+        const result = performSingleAttack(attacker, target, {
+          attackerSide, defenderSide, attackerEl, targetEl, attackerSideCards, defenderSideCards,
+        });
+        updateHealthUi(attackerEl, attacker.currentHealth);
+        updateHealthUi(targetEl, target.currentHealth);
+        if (result.attackerDamageTaken > 0) showDamage(attackerEl, result.attackerDamageTaken);
+        if (result.targetDamageTaken > 0) showDamage(targetEl, result.targetDamageTaken);
+        result.logs.forEach((line) => appendBattleLog(line));
+        if (target.currentHealth <= 0) {
+          target.isDead = true;
+          if (targetEl) targetEl.classList.add('dying');
+          appendBattleLog(`${target.displayName} 被击败。`);
+        }
+        if (attacker.currentHealth <= 0) {
+          attacker.isDead = true;
+          if (attackerEl) attackerEl.classList.add('dying');
+          appendBattleLog(`${attacker.displayName} 被反击击败。`);
+        }
+        if (targetEl) targetEl.classList.remove('impact');
+        if (attacker.currentHealth <= 0 || state.boardCards.length === 0 || state.enemyBoardCards.length === 0) break;
+      }
 
       attacker.isAttacking = false;
       attacker.isDamaged = false;
-      target.isDamaged = false;
       if (attackerEl) attackerEl.classList.remove('impact');
-      if (targetEl) targetEl.classList.remove('impact');
-
-      appendBattleLog(`${attackerSide === 'ally' ? '我方' : '敌方'} ${attacker.displayName}(${attacker.attack}/${Math.max(0, attacker.currentHealth)}) 攻击 ${defenderSide === 'ally' ? '我方' : '敌方'} ${target.displayName}。`);
-      if (target.currentHealth <= 0) {
-        target.isDead = true;
-        if (targetEl) targetEl.classList.add('dying');
-        appendBattleLog(`${target.displayName} 被击败。`);
-      }
-      if (attacker.currentHealth <= 0) {
-        attacker.isDead = true;
-        if (attackerEl) attackerEl.classList.add('dying');
-        appendBattleLog(`${attacker.displayName} 被反击击败。`);
-      }
 
       setTimeout(() => {
         removeDeadCards();
