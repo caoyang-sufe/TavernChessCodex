@@ -832,7 +832,7 @@
         <div class="zone-header">
           <div class="zone-title">
             <h2>上阵区域</h2>
-            <p>最多上阵 7 张。只能从手牌拖入，支持拖回手牌或卖出。</p>
+            <p>最多上阵 7 张。只能从手牌拖入，上阵后仅可卖出。</p>
           </div>
           <div class="zone-meta">
             <span class="zone-badge">已上阵 <strong id="board-count">0</strong> / 7</span>
@@ -1313,7 +1313,7 @@
     function canDropInto(targetZone) {
       const payload = state.dragPayload;
       if (!payload || state.phase !== 'recruit') return false;
-      if (targetZone === 'hand') return (payload.source === 'shop' || payload.source === 'board') && state.handCards.length < CARD_LIMITS.hand;
+      if (targetZone === 'hand') return payload.source === 'shop' && state.handCards.length < CARD_LIMITS.hand;
       if (targetZone === 'board') return payload.source === 'hand' && state.boardCards.length < CARD_LIMITS.board;
       if (targetZone === 'sell') return payload.source === 'hand' || payload.source === 'board';
       return false;
@@ -1331,7 +1331,6 @@
       if (!payload) return;
       if (targetZone === 'hand') {
         if (payload.source === 'shop') addShopCardToHand(payload.index);
-        else if (payload.source === 'board') moveBoardCardToHand(payload.instanceId);
       }
       if (targetZone === 'board' && payload.source === 'hand') moveHandCardToBoard(payload.instanceId);
       if (targetZone === 'sell') sellCard(payload);
@@ -1429,7 +1428,7 @@
       if (state.phase === 'recruit') {
         if (source === 'shop') actionButton = '<button class="mini-btn success" type="button">购买 -3</button>';
         else if (source === 'hand') actionButton = '<button class="mini-btn" type="button">上阵</button>';
-        else if (source === 'board') actionButton = '<button class="mini-btn danger" type="button">回手/卖出</button>';
+        else if (source === 'board') actionButton = '<button class="mini-btn danger" type="button">卖出 +1</button>';
       }
       article.innerHTML = `
         <div class="card-visual">
@@ -1457,7 +1456,7 @@
           if (hasActiveTargeting() && source !== 'board') return setStatus('请先完成或取消当前选目标。');
           if (source === 'shop') addShopCardToHand(index);
           else if (source === 'hand') moveHandCardToBoard(card.instanceId);
-          else if (source === 'board') moveBoardCardToHand(card.instanceId);
+          else if (source === 'board') sellCard({ source: 'board', instanceId: card.instanceId });
         });
       }
       return article;
