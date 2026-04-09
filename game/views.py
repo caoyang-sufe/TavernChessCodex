@@ -150,22 +150,67 @@ def _build_weapon_items(terms_pattern: re.Pattern):
 
 
 def game_view(request):
-    card_dir = Path(settings.BASE_DIR) / 'assets' / 'card'
-    card_paths = sorted(
-        f"card/{file_path.name}"
-        for file_path in card_dir.glob('*.png')
-        if file_path.is_file()
-    )
-    return render(request, 'game.html', {'card_paths': card_paths})
+    card_assets_dir = Path(settings.BASE_DIR) / 'assets' / 'card'
+    spell_assets_dir = Path(settings.BASE_DIR) / 'assets' / 'spell'
 
-def game_view(request):
-    card_dir = Path(settings.BASE_DIR) / 'assets' / 'card'
-    card_paths = sorted(
-        f"card/{file_path.name}"
-        for file_path in card_dir.glob('*.png')
-        if file_path.is_file()
+    general_records = _read_tsv('configs/card.csv') + _read_tsv('configs/card_ex.csv')
+    general_defs = []
+    for row in general_records:
+        if row.get('类型', '').strip() != '2':
+            continue
+        card_id = row.get('ID', '').strip()
+        if not card_id:
+            continue
+        image_file = card_assets_dir / f'{card_id}.png'
+        if not image_file.exists():
+            continue
+        level = int(row.get('等级', '1') or 1)
+        general_defs.append(
+            {
+                'id': card_id,
+                'kind': 'general',
+                'path': f'card/{card_id}.png',
+                'name': row.get('名称', card_id),
+                'force': row.get('势力', ''),
+                'attack': int(row.get('攻击', '0') or 0),
+                'health': int(row.get('血量', '0') or 0),
+                'skill': row.get('技能描述', ''),
+                'level': level,
+                'stars': '★' * max(1, min(6, level)),
+                'type': 'normal',
+            }
+        )
+
+    spell_defs = []
+    for row in _read_tsv('configs/spell.csv'):
+        spell_id = row.get('ID', '').strip()
+        if not spell_id:
+            continue
+        image_file = spell_assets_dir / f'{spell_id}.png'
+        if not image_file.exists():
+            continue
+        level = int(row.get('等级', '1') or 1)
+        spell_defs.append(
+            {
+                'id': spell_id,
+                'kind': 'spell',
+                'path': f'spell/{spell_id}.png',
+                'name': row.get('名称', spell_id),
+                'skill': row.get('技能描述', ''),
+                'level': level,
+                'title': f"{row.get('名称', spell_id)}·{CHINESE_NUMERAL.get(level, str(level))}",
+            }
+        )
+
+    return render(
+        request,
+        'game.html',
+        {
+            'card_defs': general_defs,
+            'spell_defs': spell_defs,
+            'skill_terms': _read_entry_terms(),
+        },
     )
-    return render(request, 'game.html', {'card_paths': card_paths})
 
 
 def handbook_view(request):
