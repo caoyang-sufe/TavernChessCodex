@@ -190,6 +190,38 @@
       font-weight: 700;
     }
 
+    .target-cancel-btn {
+      display: none;
+    }
+
+    .target-cancel-btn.active {
+      display: inline-flex;
+    }
+
+    .targeting-active .card {
+      opacity: 0.75;
+    }
+
+    .targeting-active .card.target-source {
+      opacity: 1;
+      outline: 2px solid rgba(49, 95, 127, 0.7);
+    }
+
+    .targeting-active .card.targetable {
+      opacity: 1;
+      cursor: pointer;
+      outline: 2px dashed rgba(47, 107, 80, 0.78);
+      outline-offset: 2px;
+    }
+
+    .card-keyword {
+      margin: 6px 0 0;
+      font-size: 12px;
+      color: var(--ally);
+      font-weight: 700;
+      letter-spacing: 0.04em;
+    }
+
     .recruit-layout {
       display: grid;
       grid-template-columns: minmax(0, 1fr) 220px;
@@ -734,6 +766,7 @@
           <button class="primary-btn" id="refresh-btn" type="button">刷新商店</button>
           <button class="ghost-btn" id="start-battle-btn" type="button">立即战斗</button>
           <button class="ghost-btn" id="reset-btn" type="button">重置全局</button>
+          <button class="ghost-btn target-cancel-btn" id="cancel-target-btn" type="button">取消选目标</button>
         </div>
         <div class="status" id="status-text">准备就绪，先从商店挑牌组建阵容。</div>
       </aside>
@@ -897,12 +930,17 @@
     const state = {
       phase: 'recruit', shopCards: [], handCards: [], boardCards: [], enemyBoardCards: [], refreshCount: 0, nextId: 1,
       dragPayload: null, money: START_MONEY, timerRemaining: TURN_DURATION, timerId: null, battleTimerId: null,
-      battleLog: ['战斗尚未开始。'], battleTurn: 0, battleFirstSide: 'ally'
+      battleLog: ['战斗尚未开始。'], battleTurn: 0, battleFirstSide: 'ally',
+      targeting: { active: false, sourceCard: null, filter: null, confirm: null, prompt: '', cancelNotice: '' },
+      usedJinnangCountThisGame: 0,
+      spentHufuThisTurn: 0
     };
 
     const elements = {
       app: document.getElementById('app'), shopZone: document.getElementById('shop-zone'), handZone: document.getElementById('hand-zone'), boardZone: document.getElementById('board-zone'), enemyZone: document.getElementById('enemy-zone'), allyZone: document.getElementById('ally-zone'), handCount: document.getElementById('hand-count'), boardCount: document.getElementById('board-count'), enemyCount: document.getElementById('enemy-count'), allyCount: document.getElementById('ally-count'), moneyCount: document.getElementById('money-count'), moneyFloat: document.getElementById('money-float'), poolCount: document.getElementById('pool-count'), refreshCount: document.getElementById('refresh-count'), statusText: document.getElementById('status-text'), refreshBtn: document.getElementById('refresh-btn'), resetBtn: document.getElementById('reset-btn'), startBattleBtn: document.getElementById('start-battle-btn'), timerStartBtn: document.getElementById('timer-start-btn'), timerText: document.getElementById('timer-text'), timerRing: document.getElementById('timer-ring'), sellZone: document.getElementById('sell-zone'), battleLog: document.getElementById('battle-log')
     };
+
+    elements.cancelTargetBtn = document.getElementById('cancel-target-btn');
 
     function sampleCards(count, sourcePool = cardPool) {
       const pool = [...sourcePool];
@@ -914,7 +952,7 @@
     }
 
     function instantiateCard(card) {
-      return { ...card, instanceId: state.nextId++, currentHealth: card.health, isAttacking: false, isDamaged: false, isDead: false };
+      return { ...card, instanceId: state.nextId++, currentHealth: card.health, hasTaunt: Boolean(card.hasTaunt), isAttacking: false, isDamaged: false, isDead: false };
     }
 
     function clearRecruitTimer() {
@@ -926,6 +964,120 @@
     }
 
     function setStatus(message) { elements.statusText.textContent = message; }
+
+    function spendHufu(amount) {
+      const safeAmount = Math.max(0, amount);
+      if (safeAmount <= 0) return;
+      state.money -= safeAmount;
+      state.spentHufuThisTurn += safeAmount;
+    }
+
+    function recordJinnangUse(count = 1) {
+      const safeCount = Math.max(0, count);
+      if (safeCount <= 0) return;
+      state.usedJinnangCountThisGame += safeCount;
+    }
+
+    function hasActiveTargeting() {
+      return state.targeting.active === true;
+    }
+
+    function setTargetingActiveUi(active) {
+      elements.cancelTargetBtn.classList.toggle('active', active);
+      elements.app.classList.toggle('targeting-active', active);
+    }
+
+    function clearTargeting() {
+      state.targeting.active = false;
+      state.targeting.sourceCard = null;
+      state.targeting.filter = null;
+      state.targeting.confirm = null;
+      state.targeting.prompt = '';
+      state.targeting.cancelNotice = '';
+      setTargetingActiveUi(false);
+    }
+
+    function cancelTargeting(customMessage = '') {
+      if (!hasActiveTargeting()) return;
+      const message = customMessage || state.targeting.cancelNotice || '已取消选目标，本次上阵技能未完成。';
+      clearTargeting();
+      renderRecruit();
+      setStatus(message);
+    }
+
+    function startTargeting({ sourceCard, filter, confirm, prompt, cancelNotice }) {
+      state.targeting.active = true;
+      state.targeting.sourceCard = sourceCard;
+      state.targeting.filter = typeof filter === 'function' ? filter : () => true;
+      state.targeting.confirm = typeof confirm === 'function' ? confirm : null;
+      state.targeting.prompt = prompt || `请选择 ${sourceCard.displayName} 的目标。`;
+      state.targeting.cancelNotice = cancelNotice || `${sourceCard.displayName} 的目标选择已取消，本次效果未结算。`;
+      setTargetingActiveUi(true);
+      renderRecruit();
+      setStatus(state.targeting.prompt);
+    }
+
+    function canSelectCurrentTarget(card) {
+      if (!hasActiveTargeting() || !card || typeof state.targeting.filter !== 'function') return false;
+      return state.targeting.filter(card, state.targeting.sourceCard, state);
+    }
+
+    function selectTarget(instanceId) {
+      if (!hasActiveTargeting()) return;
+      const target = state.boardCards.find((card) => card.instanceId === instanceId);
+      if (!target) return;
+      if (!canSelectCurrentTarget(target)) return setStatus(`目标不合法：${target.displayName} 不是该技能可选目标，请重新选择。`);
+      const sourceCard = state.targeting.sourceCard;
+      const confirm = state.targeting.confirm;
+      clearTargeting();
+      if (typeof confirm === 'function') confirm(target, sourceCard, state);
+      renderRecruit();
+    }
+
+    function triggerOnPlay(card) {
+      if (card.baseName === 'mizhu') {
+        state.boardCards.forEach((unit) => {
+          unit.attack += 1;
+          unit.health += 1;
+          unit.currentHealth += 1;
+        });
+        setStatus('糜竺上阵，场上所有卡牌获得 +1/+1。');
+        return true;
+      }
+      if (card.baseName === 'liubei') {
+        startTargeting({
+          sourceCard: card,
+          prompt: '刘备上阵：请选择另一名我方单位，使其获得 +2/+2（右键或点“取消选目标”可取消）。',
+          cancelNotice: '刘备上阵技能已取消，本次当先未完成，请重新发起。',
+          filter: (target, source) => target.instanceId !== source.instanceId,
+          confirm: (target) => {
+            target.attack += 2;
+            target.health += 2;
+            target.currentHealth += 2;
+            setStatus(`刘备鼓舞了 ${target.displayName}，其获得 +2/+2。`);
+          }
+        });
+        return false;
+      }
+      if (card.baseName === 'taoqian') {
+        startTargeting({
+          sourceCard: card,
+          prompt: '陶谦当先：请选择另一名我方单位，使其获得 +1/+3（右键或点“取消选目标”可取消）。',
+          cancelNotice: '陶谦当先已取消，本次当先未完成，请重新发起。',
+          filter: (target, source) => target.instanceId !== source.instanceId,
+          confirm: (target) => {
+            target.attack += 1;
+            target.health += 3;
+            target.currentHealth += 3;
+            target.hasTaunt = true;
+            setStatus(`陶谦援助了 ${target.displayName}，其获得 +1/+3 并附加【挑衅】。`);
+          }
+        });
+        return false;
+      }
+      setStatus(`${card.displayName} 已上阵。`);
+      return true;
+    }
 
     function updateTimerUi() {
       elements.timerText.textContent = String(state.timerRemaining);
@@ -964,6 +1116,8 @@
       state.phase = 'recruit';
       clearBattleTimer();
       clearRecruitTimer();
+      clearTargeting();
+      state.spentHufuThisTurn = 0;
       state.enemyBoardCards = [];
       state.battleTurn = 0;
       state.battleLog = ['战斗尚未开始。'];
@@ -975,12 +1129,15 @@
     function resetGame() {
       clearRecruitTimer();
       clearBattleTimer();
+      clearTargeting();
       state.handCards = [];
       state.boardCards = [];
       state.enemyBoardCards = [];
       state.refreshCount = 0;
       state.nextId = 1;
       state.money = START_MONEY;
+      state.usedJinnangCountThisGame = 0;
+      state.spentHufuThisTurn = 0;
       state.phase = 'recruit';
       state.battleLog = ['战斗尚未开始。'];
       refreshShop(false);
@@ -1041,12 +1198,13 @@
     }
 
     function addShopCardToHand(shopIndex) {
+      if (hasActiveTargeting()) return setStatus('请先完成或取消当前选目标，再执行其他操作。');
       if (state.phase !== 'recruit') return;
       if (state.handCards.length >= CARD_LIMITS.hand) return setStatus('手牌已满，最多只能容纳 10 张。');
       if (state.money < BUY_PRICE) return setStatus('金币不足，购买一张卡需要 3 金币。');
       const card = state.shopCards[shopIndex];
       if (!card) return;
-      state.money -= BUY_PRICE;
+      spendHufu(BUY_PRICE);
       state.shopCards[shopIndex] = null;
       state.handCards.push(instantiateCard(card));
       renderRecruit();
@@ -1054,26 +1212,19 @@
     }
 
     function moveHandCardToBoard(instanceId) {
+      if (hasActiveTargeting()) return setStatus('请先完成或取消当前选目标，再继续上阵。');
       if (state.phase !== 'recruit') return;
       if (state.boardCards.length >= CARD_LIMITS.board) return setStatus('上阵区域已满，最多只能上阵 7 张。');
       const index = state.handCards.findIndex((card) => card.instanceId === instanceId);
       if (index === -1) return;
       const [card] = state.handCards.splice(index, 1);
       state.boardCards.push(card);
-      if (card.baseName === 'mizhu') {
-        state.boardCards.forEach((unit) => {
-          unit.attack += 1;
-          unit.health += 1;
-          unit.currentHealth += 1;
-        });
-        setStatus('糜竺上阵，场上所有卡牌获得 +1/+1。');
-      } else {
-        setStatus(`${card.displayName} 已上阵。`);
-      }
+      triggerOnPlay(card);
       renderRecruit();
     }
 
     function moveBoardCardToHand(instanceId) {
+      if (hasActiveTargeting()) return setStatus('请先完成或取消当前选目标，再执行回手。');
       if (state.phase !== 'recruit') return;
       if (state.handCards.length >= CARD_LIMITS.hand) return setStatus('手牌已满，无法把上阵卡拖回手牌。');
       const index = state.boardCards.findIndex((card) => card.instanceId === instanceId);
@@ -1085,6 +1236,7 @@
     }
 
     function sellCard(payload) {
+      if (hasActiveTargeting()) return setStatus('请先完成或取消当前选目标，再执行卖牌。');
       if (state.phase !== 'recruit') return;
       let soldCard = null;
       if (payload.source === 'hand') {
@@ -1112,10 +1264,25 @@
         article.addEventListener('dragstart', (event) => beginDrag(source === 'shop' ? { source, index } : { source, instanceId: card.instanceId }, event));
         article.addEventListener('dragend', endDrag);
       }
+      if (source === 'board' && hasActiveTargeting()) {
+        if (state.targeting.sourceCard && state.targeting.sourceCard.instanceId === card.instanceId) article.classList.add('target-source');
+        if (canSelectCurrentTarget(card)) article.classList.add('targetable');
+      }
+      if (source === 'board') {
+        article.addEventListener('click', () => {
+          if (hasActiveTargeting()) { selectTarget(card.instanceId); return; }
+        });
+        article.addEventListener('contextmenu', (event) => {
+          if (!hasActiveTargeting()) return;
+          event.preventDefault();
+          cancelTargeting();
+        });
+      }
       if (card.isAttacking) article.classList.add('attacking');
       if (card.isDamaged) article.classList.add('damaged');
       if (card.isDead) article.classList.add('dead');
       const variantText = card.variant ? `变体 ${card.variant}` : '基础版';
+      const keywordText = card.hasTaunt && (source === 'board' || source === 'ally-battle') ? '<p class="card-keyword">挑衅</p>' : '';
       let actionButton = '';
       if (state.phase === 'recruit') {
         if (source === 'shop') actionButton = '<button class="mini-btn success" type="button">购买 -3</button>';
@@ -1138,12 +1305,14 @@
         <div class="card-body">
           <h3 class="card-name">${card.displayName}</h3>
           <p class="card-meta">${card.fileName}</p>
+          ${keywordText}
         </div>
         ${actionButton ? `<div class="card-actions">${actionButton}</div>` : ''}
       `;
       if (actionButton) {
         const button = article.querySelector('button');
         button.addEventListener('click', () => {
+          if (hasActiveTargeting() && source !== 'board') return setStatus('请先完成或取消当前选目标。');
           if (source === 'shop') addShopCardToHand(index);
           else if (source === 'hand') moveHandCardToBoard(card.instanceId);
           else if (source === 'board') moveBoardCardToHand(card.instanceId);
@@ -1207,6 +1376,7 @@
       elements.refreshBtn.disabled = state.phase !== 'recruit';
       elements.startBattleBtn.disabled = state.phase !== 'recruit';
       elements.timerStartBtn.disabled = state.phase !== 'recruit';
+      setTargetingActiveUi(hasActiveTargeting());
       renderRecruit();
       renderBattle();
     }
@@ -1309,6 +1479,7 @@
 
     function startBattle() {
       if (state.phase === 'battle') return;
+      if (hasActiveTargeting()) return setStatus('请先完成或取消当前选目标，再进入战斗。');
       clearRecruitTimer();
       state.phase = 'battle';
       state.battleTurn = 0;
@@ -1419,6 +1590,7 @@
     elements.resetBtn.addEventListener('click', resetGame);
     elements.startBattleBtn.addEventListener('click', startBattle);
     elements.timerStartBtn.addEventListener('click', startBattle);
+    elements.cancelTargetBtn.addEventListener('click', () => cancelTargeting());
     resetGame();
   </script>
 </body>
