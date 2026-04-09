@@ -12,6 +12,9 @@ TYPE_MAP = {'1': 'gold', '2': 'normal'}
 TYPE_NAME_MAP = {'1': '金色版本', '2': '普通版本'}
 CHINESE_NUMERAL = {1: '一', 2: '二', 3: '三', 4: '四', 5: '五', 6: '六'}
 
+def _static_url(relative_path: str):
+    return f"{settings.STATIC_URL}{relative_path}"
+
 
 def _list_images(relative_dir: str):
     target_dir = Path(settings.BASE_DIR) / 'assets' / relative_dir
@@ -64,6 +67,7 @@ def _build_general_items(asset_subdir: str):
         items.append(
             {
                 'image': f'{asset_subdir}/{card_id}.png',
+                'image_url': _static_url(f'{asset_subdir}/{card_id}.png'),
                 'name': row.get('名称', ''),
                 'force': row.get('势力', ''),
                 'attack': row.get('攻击', ''),
@@ -90,6 +94,7 @@ def _build_spell_items():
         items.append(
             {
                 'image': f'spell/{card_id}.png',
+                'image_url': _static_url(f'spell/{card_id}.png'),
                 'title': f"{row.get('名称', '')}·{CHINESE_NUMERAL.get(level, str(level))}",
                 'skill': row.get('技能描述', ''),
             }
@@ -108,6 +113,7 @@ def _build_weapon_items():
         items.append(
             {
                 'image': f'weapon/{card_id}.png',
+                'image_url': _static_url(f'weapon/{card_id}.png'),
                 'name': row.get('名称', ''),
                 'type_name': row.get('类型', ''),
                 'skill': row.get('技能描述', ''),
@@ -136,7 +142,9 @@ def handbook_view(request):
         _paginate(request, _build_weapon_items(), '装备图鉴（assets/weapon）', 'weapon_page', 'weapon'),
     ]
 def game_view(request):
-    card_paths = _list_images('card')
+    card_paths = 
+    
+    ('card')
     return render(request, 'game.html', {'card_paths': card_paths})
 
 
